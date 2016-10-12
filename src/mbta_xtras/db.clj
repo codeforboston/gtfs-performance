@@ -3,7 +3,8 @@
             [monger.core :as mg]
             [monger.operators :refer [$near]]
 
-            [mbta-xtras.gtfs :as gtfs]))
+            [mbta-xtras.gtfs :as gtfs]
+            [clojure.string :as str]))
 
 ;; (def *mongo-uri
 ;;   "mongodb://mbtafyi:3KIJ6Hpb0FXJleeJsRKv1PhbaYblD7ca9H5qO9UvrIoyKHbnFfTFpTZtsTsTuFfLlNUZpbJSmXqaqGsKh3pQ9Q==@mbtafyi.documents.azure.com:10250/mbta?ssl=true")
@@ -18,17 +19,21 @@
    :coordinates [(Double/parseDouble (lon-k m))
                  (Double/parseDouble (lat-k m))]})
 
-(defn near-query [lat lon]
-  {$near {"$geometry" {:type "Point"
-                       :coordinates [lon lat]}
-          "$maxDistance" 50}})
+(defn near-query
+  ([lat lon & [max-dist]]
+   {$near {"$geometry" {:type "Point"
+                        :coordinates [lon lat]}
+           "$maxDistance" (or max-dist 50)}}))
 
 ; Stops:
 (defn drop-stops! [db]
   (mc/drop db "stops"))
 
 (defn process-stop [stop]
-  (assoc stop :coords (make-point stop :stop-lat :stop-lon)))
+  (-> stop
+      (assoc :coords (make-point stop :stop-lat :stop-lon))
+      (update :stop-lat #(Double/parseDouble %))
+      (update :stop-lon #(Double/parseDouble %))))
 
 (defn insert-stops! [db]
   (mc/insert-batch db "stops"
@@ -55,11 +60,48 @@
 (defn insert-shapes! [db]
   (mc/insert-batch db "shapes" (make-shapes (gtfs/get-shapes))))
 
+(defn drop-shapes! [db]
+  (mc/drop db "shapes"))
+
 ;; Trips
+(defn drop-trips! [db]
+  (mc/drop db "trips"))
+
+(def process-trip identity)
+
 (defn insert-trips! [db]
   (mc/insert-batch db "trips"
                    (map process-trip (gtfs/get-trips))))
 
+(defn drop-all! [db]
+  (doseq [coll ["stops" "trips" "shapes"]]
+    (mc/drop db coll)))
+
+(defn rebuild! [db]
+  (doto db
+    (drop-all!)
+    (insert-stops!)
+    (insert-shapes!)
+    (insert-trips!)))
+
+(defn make-re [s]
+  (re-pattern (str "(?<=\\b|^)"
+                   (str/replace s #"[\[\\.?\^\(]" "\\\\$0"))))
+
+
+(defn build-stop-query [{:keys [q lat lon dist]}]
+  (cond-> {}
+    q (assoc :stop-name (make-re q))
+    (and lat lon) (assoc :coords (near-query
+                                  (Double/parseDouble lat)
+                                  (Double/parseDouble lon)
+                                  (Integer/parseInt dist)))))
+
+(defn find-stops [conn params]
+  (mc/find-maps (mg/get-db conn "mbta")
+                "stops"
+                (build-stop-query params)
+                {:_id 0}))
 
 (comment
   (setup-db *db)
