@@ -12,6 +12,10 @@
                  [org.clojure/data.csv "0.1.3"]
 
                  [compojure "1.6.0-beta1"]
-                 [aleph "0.4.2-alpha8"]]
+                 [aleph "0.4.2-alpha8"]
+
+                 [com.google.protobuf/protobuf-java "2.6.1"]
+                 [org.clojure/core.async "0.2.391"]]
+  :java-source-paths ["src/java"]
   :main mbta-xtras.system
   :uberjar {:aot :all})
