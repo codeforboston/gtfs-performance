@@ -47,6 +47,10 @@
 
 (defn double-key [k] #(Double/parseDouble (k %)))
 
+;; Stop times
+(defn insert-stop-times! [db]
+  (mc/insert-batch db "stop-times" (gtfs/get-stop-times)))
+
 ;; Shapes
 (defn make-shapes [shape-points]
   (map (fn [points]

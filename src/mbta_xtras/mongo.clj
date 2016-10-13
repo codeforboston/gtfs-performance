@@ -13,6 +13,10 @@
     (mc/ensure-index db "stops" (array-map :coords "2dsphere"))
 
     (mc/ensure-index db "shapes" (array-map :path "2dsphere"))
+
+    (mc/ensure-index db "trips" (array-map :shape-id 1))
+
+    (mc/ensure-index db "stop-times" (array-map :stop-id 1 :stop-sequence 1))
     (catch Exception _exc)))
 
 (defrecord MongoDB [uri]
