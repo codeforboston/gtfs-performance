@@ -7,11 +7,12 @@
             [clojure.string :as str]))
 
 (defn find-stops [{:keys [mongo params]}]
-  (println "Hello, world")
-  (prn mongo params)
   {:status 200
    :headers {"Content-type" "application/json"}
    :body (json/write-str (db/find-stops mongo params))})
+
+#_
+(defn )
 
 ;; (defroutes handler
 ;;   (context "/xapi" []

@@ -49,7 +49,12 @@
 
 ;; Stop times
 (defn insert-stop-times! [db]
-  (mc/insert-batch db "stop-times" (gtfs/get-stop-times)))
+  (doseq [stop-times-group (partition 20000 (gtfs/get-stop-times))]
+    (mc/insert-batch db "stop-times" stop-times-group)))
+
+(defn stop-times-for-trip [db trip-id]
+  (mc/find-maps db "stop-times" {:trip-id trip-id}
+                {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1}))
 
 ;; Shapes
 (defn make-shapes [shape-points]
