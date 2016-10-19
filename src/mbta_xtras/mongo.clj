@@ -1,7 +1,6 @@
 (ns mbta-xtras.mongo
   (:require [com.stuartsierra.component :as component]
             [monger.core :as mg]
-            [monger.core :as mg]
 
             [environ.core :refer [env]]
             [monger.collection :as mc]))

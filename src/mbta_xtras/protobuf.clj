@@ -1,29 +1,23 @@
 (ns mbta-xtras.protobuf
-  (:require [clojure.core.async :refer [>! chan go]]
+  (:require [clojure.core.async :refer [<! >! chan go-loop timeout] :as async]
             [clojure.java.io :as io]
             [mbta-xtras.db :as db])
+
   (:import clojure.lang.Reflector
            com.google.protobuf.CodedInputStream
-           com.google.transit.realtime.GtfsRealtime
+           [com.google.transit.realtime GtfsRealtime GtfsRealtime$FeedMessage]
            [java.time LocalDate LocalDateTime LocalTime Instant]
            [java.time.format DateTimeFormatter]
            java.time.temporal.ChronoUnit))
 
-(def vehicle-positions-url
-  "http://developer.mbta.com/lib/GTRTFS/Alerts/VehiclePositions.pb")
 
 (def trip-updates-url
   "http://developer.mbta.com/lib/GTRTFS/Alerts/TripUpdates.pb")
-
-(def alerts-url
-  "http://developer.mbta.com/lib/GTRTFS/Alerts/Alerts.pb")
 
 
 (defn get-feed [url]
   (GtfsRealtime$FeedMessage/parseFrom (io/input-stream url)))
 
-(defn get-vehicle-updates []
-  (get-feed vehicle-positions-url))
 
 (defn get-trip-updates []
   (get-feed trip-updates-url))
@@ -35,14 +29,6 @@
    :stop-id (.getStopId u)
    :stop-sequence (.getStopSequence u)})
 
-(defn process-trip-update [u]
-  {:delay (.getDelay u)
-   :timestamp (.getTimestamp u)
-   :stop-time-updates (mapv process-stop-time-update (.getStopTimeUpdateList u))
-   :vehicle-id (.. u getVehicle getId)
-   ;:route-id (. update getRouteId)
-   })
-
 (defn timestamp [u]
   (.. u getHeader getTimestamp))
 
@@ -53,7 +39,9 @@
 (defn trip-updates [^GtfsRealtime$FeedMessage message]
   (keep (memfn getTripUpdate) (. message getEntityList)))
 
-(defn stuff [u]
+(defn all-stop-updates
+  "Processes an ISeq of trip updates into a lazy seq of maps containing information about all the stops "
+  [trip-updates]
   (mapcat (fn [tu]
             (let [start-date (.. tu getTrip getStartDate)
                   trip-id (.. tu getTrip getTripId)]
@@ -62,71 +50,44 @@
                       :stop-sequence (.getStopSequence stop-update)
                       :arrival-time (.. stop-update getArrival getTime)
                       :trip-id trip-id
-                      :trip-start start-date})
+                      :trip-start start-date
+                      ; Unique ID.  We may get multiple updates for the same
+                      ; stop on the same trip. We'll assume that later updates
+                      ; are going to better represent the true arrival time of
+                      ; the vehicle.
+                      :trip-stop-id (str trip-id "-" start-date "-" (.getStopId stop-update))})
                    (.getStopTimeUpdateList tu))))
-          (trip-updates u)))
-
-(defn past-arrival-times
-  "Returns pairs of [TripUpdate (past-arrivals)], where past arrivals are
-  arrivals with a timestamp earlier than the timestamp of the message."
-  [^GtfsRealtime$FeedMessage u]
-  (let [stamp (timestamp u)]
-    (map (fn [tu]
-           [tu (map stop-update->map (stop-updates-before tu stamp))])
-         (trip-updates u))))
-
-(defn datetime-for-stamp [stamp]
-  (LocalDateTime/from (Instant/ofEpochSecond stamp)))
-
-(def datetime-format (DateTimeFormatter/ofPattern "yyyyMMdd"))
-(defn datetime-for-str [date-str]
-  (LocalDateTime/of (LocalDate/parse date-str datetime-format)
-                    LocalTime/MIDNIGHT))
-
-(defn offset-time
-  "Returns a new LocalDateTime that is offset from the reference date by the
-  number of hours, minutes, and seconds given in the time-str."
-  [ref-date time-str]
-  (let [[h m s] (re-find #"(\d\d?):(\d\d):(\d\d)" time-str)]
-    (-> ref-date
-        (.truncatedTo ChronoUnit/DAYS)
-        (.plusHours (long h))
-        (.plusMinute (long m))
-        (.plusSeconds (long s)))))
-
-(defn late-arrivals [db arrivals]
-  (keep (fn [arrival]
-          (let []))))
-
-;; Turns out not to be useful for the MBTA feed!
-(defn get-delayed-stops
-  "Takes the StopTimeUpdates for a given TripUpdate and returns only those
-  updates that represent a late arrival time."
-  [trip-update]
-  (filter #(pos? (.. % getArrival getDelay))
-          (.getStopTimeUpdateList trip-update)))
-
-(defn get-delayed-trip-stops
-  "Takes an iterable of FeedEntity objects and filters out those that have at
-  least one stop update reported as delayed."
-  [updates]
-  (keep (fn [update]
-         (let [trip-update (.getTripUpdate update)
-               trip (.getTrip trip-update)
-               delayed (get-delayed-stops trip-update)]
-           (when (seq delayed)
-             {:trip-id (.getTripId trip)
-              :trip-start (.getStartDate trip)
-              :route-id (.getRouteId trip)
-              :delays (map stop-update->map delayed)})))
-        updates))
+          trip-updates))
 
 
-(defn find-delays
-  ([u stamp]
-   ((.getEntityList u)))
-  ([u]
-   (find-delays u (timestamp u))))
+(defn pipe-trip-updates
+  "Retrieve trip stop updates at an interval, process them, and put them on a
+  channel. Returns a go channel."
+  [to & {:keys [interval close?]
+         :or {interval 15000
+              close? true}}]
+  (go-loop [last-stamp 0]
+    (let [updates (get-trip-updates)
+          stamp (.. updates getHeader getTimestamp)]
 
-;; Notes: It seems like the MBTA's TripUpdates feed does not actually report
-;; delays.
+      ;; We'll continue running if the stamp indicates that the update is old OR
+      ;; if the update is new and we succeed in putting all the updates on the
+      ;; channel. This allows the user to halt the loop by closing the `to`
+      ;; channel.
+      (when (or (<= stamp last-stamp)
+                (not-any? nil?
+                          (for [update (all-stop-updates (filter #(> (.getTimestamp %) last-stamp)
+                                                                 (trip-updates updates)))]
+                            (>! to update)))
+                (not close?))
+        (<! (timeout interval))
+        (recur stamp)))))
+
+
+(defn trip-updates-chan
+  "Creates and returns a new channel that will receive trip stop update maps as
+  they become available. Older values will be dropped if not consumed."
+  []
+  (let [c (chan (async/sliding-buffer 100))]
+    (pipe-trip-updates c)
+    c))

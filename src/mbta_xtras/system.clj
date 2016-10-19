@@ -2,12 +2,16 @@
   (:require [com.stuartsierra.component :as component]
             [mbta-xtras
              [mongo :as mongo]
+             [trip-performance :refer [make-recorder]]
              [web :as web]])
   (:gen-class))
 
 (defn api-system []
   (component/system-map
    :mongo (mongo/make-mongo)
+   :recorder (component/using
+              (make-recorder)
+              {:mongo :mongo})
    :webserver (component/using
                (web/make-server)
                {:mongo :mongo})))
