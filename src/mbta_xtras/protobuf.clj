@@ -1,14 +1,11 @@
 (ns mbta-xtras.protobuf
-  (:require [clojure.core.async :refer [<! >! chan go-loop timeout] :as async]
+  (:require [clojure.core.async :refer [<! >! alt! chan go-loop timeout] :as async]
             [clojure.java.io :as io]
             [mbta-xtras.db :as db])
 
   (:import clojure.lang.Reflector
            com.google.protobuf.CodedInputStream
-           [com.google.transit.realtime GtfsRealtime GtfsRealtime$FeedMessage]
-           [java.time LocalDate LocalDateTime LocalTime Instant]
-           [java.time.format DateTimeFormatter]
-           java.time.temporal.ChronoUnit))
+           [com.google.transit.realtime GtfsRealtime GtfsRealtime$FeedMessage]))
 
 
 (def trip-updates-url
@@ -21,6 +18,13 @@
 
 (defn get-trip-updates []
   (get-feed trip-updates-url))
+
+
+#_
+(defn get-trip-updates []
+  (let [updates (get-feed trip-updates-url)]
+    (println (count (.getEntityList updates)))
+    updates))
 
 
 (defn stop-update->map [u]
@@ -55,39 +59,29 @@
                       ; stop on the same trip. We'll assume that later updates
                       ; are going to better represent the true arrival time of
                       ; the vehicle.
-                      :trip-stop-id (str trip-id "-" start-date "-" (.getStopId stop-update))})
+                      :id (str trip-id "-" start-date "-" (.getStopId stop-update))})
                    (.getStopTimeUpdateList tu))))
           trip-updates))
 
 
-(defn pipe-trip-updates
+(defn trip-updates->!
   "Retrieve trip stop updates at an interval, process them, and put them on a
-  channel. Returns a go channel."
+  channel. Returns a channel that, when closed or given a value, will stop the
+  loop."
   [to & {:keys [interval close?]
-         :or {interval 15000
-              close? true}}]
-  (go-loop [last-stamp 0]
-    (let [updates (get-trip-updates)
-          stamp (.. updates getHeader getTimestamp)]
+         :or {interval 15000}}]
+  (let [stop (chan)]
+    (go-loop [last-stamp 0]
+      (let [updates (get-trip-updates)
+            stamp (.. updates getHeader getTimestamp)]
+        (when (> stamp last-stamp)
+          (doseq [update (all-stop-updates
+                          (filter #(> (.getTimestamp %) last-stamp)
+                                  (trip-updates updates)))]
+            (>! to update)))
 
-      ;; We'll continue running if the stamp indicates that the update is old OR
-      ;; if the update is new and we succeed in putting all the updates on the
-      ;; channel. This allows the user to halt the loop by closing the `to`
-      ;; channel.
-      (when (or (<= stamp last-stamp)
-                (not-any? nil?
-                          (for [update (all-stop-updates (filter #(> (.getTimestamp %) last-stamp)
-                                                                 (trip-updates updates)))]
-                            (>! to update)))
-                (not close?))
-        (<! (timeout interval))
-        (recur stamp)))))
+        (alt!
+          (timeout interval) (recur stamp)
+          stop nil)))))
 
 
-(defn trip-updates-chan
-  "Creates and returns a new channel that will receive trip stop update maps as
-  they become available. Older values will be dropped if not consumed."
-  []
-  (let [c (chan (async/sliding-buffer 100))]
-    (pipe-trip-updates c)
-    c))

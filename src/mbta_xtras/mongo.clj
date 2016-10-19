@@ -7,7 +7,7 @@
 
 (defn setup-db [db]
   (try
-    (mc/ensure-index db "stops" (array-map :stop-name "text"))
+    ;(mc/ensure-index db "stops" (array-map :stop-name "text"))
     (mc/ensure-index db "stops" (array-map :stop-name 1))
     (mc/ensure-index db "stops" (array-map :coords "2dsphere"))
 
@@ -42,3 +42,4 @@
 
 (defn make-mongo []
   (->MongoDB (env :mongo-uri "mongodb://localhost/mbta")))
+
