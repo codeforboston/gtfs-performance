@@ -1,4 +1,5 @@
 (ns mbta-xtras.gtfs
+  "Some utilities for reading a zipped GTFS manifest."
   (:require [environ.core :refer [env]]
             [clojure.data.csv :refer [read-csv]]
             [clojure.java.io :as io]
@@ -25,7 +26,7 @@
        (io/copy zip out-file))
      out-file))
   ([]
-   (download-zip "resources/MBTA_GTFS.zip")))
+   (download-zip gtfs-path)))
 
 (defn- hyphenate [s]
   (str/replace s #"[_.]" "-"))
@@ -54,9 +55,9 @@
   (fn [vals]
     (into {} (map vector fields vals))))
 
-(defn csv-to-maps [csv]
-  (let [fields (map (comp keyword hyphenate) (first csv))]
-    (map (vec->map fields) (rest csv))))
+(defn csv-to-maps [[header & rows]
+  (let [fields (map (comp keyword hyphenate) header)]
+    (map (vec->map fields) rows)))
 
 (defn get-csv [gtfs-path file-name]
   (-> (zip-reader gtfs-path file-name)

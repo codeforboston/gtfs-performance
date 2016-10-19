@@ -6,7 +6,12 @@
              [web :as web]])
   (:gen-class))
 
-(defn api-system []
+
+(defn api-system
+  "Returns a new system map describing the default components of the application
+  and their interdependencies. Run `component/start-system` on the result to
+  start running the application."
+  []
   (component/system-map
    :mongo (mongo/make-mongo)
    :recorder (component/using
@@ -15,7 +20,6 @@
    :webserver (component/using
                (web/make-server)
                {:mongo :mongo})))
-
 
 (def system (api-system))
 

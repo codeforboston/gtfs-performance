@@ -48,21 +48,6 @@
 (defn trip-updates [^GtfsRealtime$FeedMessage message]
   (keep (memfn getTripUpdate) (. message getEntityList)))
 
-(defn all-stop-updates
-  "Processes "
-  [^GtfsRealtime$FeedMessage u]
-  (mapcat (fn [tu]
-            (let [start-date (.. tu getTrip getStartDate)
-                  trip-id (.. tu getTrip getTripId)]
-              (map (fn [stop-update]
-                     {:stop-id (.getStopId stop-update)
-                      :stop-sequence (.getStopSequence stop-update)
-                      :arrival-time (.. stop-update getArrival getTime)
-                      :trip-id trip-id
-                      :trip-start start-date})
-                   (.getStopTimeUpdateList tu))))
-          (trip-updates u)))
-
 (defn past-arrival-times
   "Returns pairs of [TripUpdate (past-arrivals)], where past arrivals are
   arrivals with a timestamp earlier than the timestamp of the message."
@@ -72,36 +57,15 @@
            [tu (map stop-update->map (stop-updates-before tu stamp))])
          (trip-updates u))))
 
-(defn datetime-for-stamp [stamp]
-  (LocalDateTime/from (Instant/ofEpochSecond stamp)))
 
-(def datetime-format (DateTimeFormatter/ofPattern "yyyyMMdd"))
-(defn datetime-for-str [date-str]
-  (LocalDateTime/of (LocalDate/parse date-str datetime-format)
-                    LocalTime/MIDNIGHT))
-
-(defn offset-time
-  "Returns a new LocalDateTime that is offset from the reference date by the
-  number of hours, minutes, and seconds given in the time-str."
-  [ref-date time-str]
-  (let [[h m s] (re-find #"(\d\d?):(\d\d):(\d\d)" time-str)]
-    (-> ref-date
-        (.truncatedTo ChronoUnit/DAYS)
-        (.plusHours (long h))
-        (.plusMinute (long m))
-        (.plusSeconds (long s)))))
-
-(defn late-arrivals [db arrivals]
-  (keep (fn [arrival]
-          (let []))))
-
-;; Turns out not to be useful for the MBTA feed!
+;; Turns out not to be useful for the MBTA feed, since it doesn't report delays!
 (defn get-delayed-stops
   "Takes the StopTimeUpdates for a given TripUpdate and returns only those
   updates that represent a late arrival time."
   [trip-update]
   (filter #(pos? (.. % getArrival getDelay))
           (.getStopTimeUpdateList trip-update)))
+
 
 (defn get-delayed-trip-stops
   "Takes an iterable of FeedEntity objects and filters out those that have at
@@ -125,12 +89,3 @@
   ([u]
    (find-delays u (timestamp u))))
 
-(defn pipe-trip-updates
-  ""
-  [to & {:keys [interval]
-         :or {interval 15}}]
-  (go-loop []
-    (let [updates ()]))
-  )
-;; Notes: It seems like the MBTA's TripUpdates feed does not actually report
-;; delays.
