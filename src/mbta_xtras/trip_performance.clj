@@ -29,17 +29,31 @@
 (defn datetime-for-str [date-str] (LocalDateTime/of (LocalDate/parse date-str datetime-format)
                     LocalTime/MIDNIGHT))
 
+(defn set-hours
+  [dt h]
+  (if (> h 23)
+    ;; Use plusDays and not simply plusHours, just in case there's a clock
+    ;; change on the reference day.
+    (-> dt
+        (.plusDays (quot h 24))
+        (.plusHours (rem h 24)))
 
+    (.withHour dt h)))
+
+;; In the manifest, trip stop times are reported as offsets from the start of
+;; the day when the trip runs.
 (defn offset-time
   "Returns a new LocalDateTime that is offset from the reference date by the
-  number of hours, minutes, and seconds given in the time-str."
+  number of hours, minutes, and seconds given in the time-str. The time-str has
+  the format hh:mm:ss, which is roughly the wall clock time, but it can be
+  bigger than 23 for trips that begin on one day and end the next day."
   [ref-date time-str]
   (let [[h m s] (re-find #"(\d\d?):(\d\d):(\d\d)" time-str)]
     (-> ref-date
         (.truncatedTo ChronoUnit/DAYS)
-        (.plusHours (long h))
-        (.plusMinute (long m))
-        (.plusSeconds (long s)))))
+        (set-hours (long h))
+        (.withMinute (long m))
+        (.withSecond (long s)))))
 
 
 (defn read-updates-into-db

@@ -15,7 +15,8 @@
                  [aleph "0.4.2-alpha8"]
 
                  [com.google.protobuf/protobuf-java "2.6.1"]
-                 [org.clojure/core.async "0.2.391"]]
+                 [org.clojure/core.async "0.2.391"]
+                 [org.clojure/test.check "0.9.0"]]
   :java-source-paths ["src/java"]
   :main mbta-xtras.system
   :uberjar {:aot :all})

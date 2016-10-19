@@ -55,7 +55,7 @@
   (fn [vals]
     (into {} (map vector fields vals))))
 
-(defn csv-to-maps [[header & rows]
+(defn csv-to-maps [[header & rows]]
   (let [fields (map (comp keyword hyphenate) header)]
     (map (vec->map fields) rows)))
 
@@ -75,3 +75,6 @@
 
 (defn get-shapes []
   (get-csv gtfs-path "shapes.txt"))
+
+(defn get-agencies []
+  (get-csv gtfs-path "agencies.txt"))

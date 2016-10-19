@@ -1,6 +1,7 @@
 (ns mbta-xtras.protobuf
   (:require [clojure.core.async :refer [<! >! alt! chan go-loop timeout] :as async]
             [clojure.java.io :as io]
+            [clojure.spec :as s]
             [environ.core :refer [env]]
             [mbta-xtras.db :as db])
 
@@ -23,7 +24,7 @@
 
 (defn get-trip-updates
   "Note that since this is designed with the MBTA's GTFS-RT feed in mind, the
-  update types (trip, vehicle, alert) are "
+  update types (trip, vehicle, alert) are delivered on separate feed."
   []
   (let [updates (get-feed trip-updates-url)]
     (println (count (.getEntityList updates)))
@@ -43,7 +44,7 @@
 (defn all-stop-updates
   "Processes an ISeq of trip updates into a lazy seq of maps containing
   information about all the stop updates reported on each trip. Maps have an :id
-  attribute that uniquely identifies the trip's arrivals"
+  attribute that uniquely identifies the trip's arrivals."
   [trip-updates]
   (mapcat (fn [tu]
             (let [start-date (.. tu getTrip getStartDate)
@@ -54,10 +55,13 @@
                       :arrival-time (.. stop-update getArrival getTime)
                       :trip-id trip-id
                       :trip-start start-date
-                      ; Unique ID.  We may get multiple updates for the same
-                      ; stop on the same trip. We'll assume that later updates
-                      ; are going to better represent the true arrival time of
-                      ; the vehicle.
+                      ;; Unique ID.  We may get multiple updates for the same
+                      ;; stop on the same trip. We'll assume that later updates
+                      ;; are going to better represent the true arrival time of
+                      ;; the vehicle.
+                      ;; Since this is really a storage consideration, maybe
+                      ;; move this elsewhere? If the storage backend supported
+                      ;; it, we'd be using a compound index.
                       :id (str trip-id "-" start-date "-" (.getStopId stop-update))})
                    (.getStopTimeUpdateList tu))))
           trip-updates))
@@ -72,7 +76,9 @@
     (go-loop [last-stamp 0]
       (if-let [updates (try (get-trip-updates)
                             ;; Ignore errors; we'll assume for now that they're
-                            ;; due to transient network issues or quota limits.
+                            ;; due to transient network issues, quotas, or (I
+                            ;; suspect) non-atomic writing to the protobuf on
+                            ;; the part of the MBTA.
                             (catch Exception ex (prn ex)))]
         (let [stamp (.. updates getHeader getTimestamp)]
           (when (> stamp last-stamp)
