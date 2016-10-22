@@ -1,0 +1,36 @@
+* Purpose
+  
+  Fills in some gaps in the current MBTA API.
+
+* Usage
+  
+** Requirements
+   - Java 8 (for the ~java.time~ package)
+     
+   - [[http://leiningen.org][Leiningen 2]] - a package management and build tool for Clojure
+
+** Running
+   For interactive development, I recommend using [[http://cider.readthedocs.io/en/latest/][Cider]] or [[https://cursive-ide.com][Cursive]] and jacking
+   in. By default, the REPL starts in the ~mbta-xtras.repl~ namespace. Run
+   ~(system/start)~ to start the application. Run ~(start-mongo)~ to just start
+   Mongo, and ~mbta-xtras.repl/db~ will be bound to the database for
+   convenience. ~(stop-mongo)~ will close the connection.
+   
+** Environment Variables
+   - MONGO_URI :: This should be a URI of the form ~mongodb://<host>/db~.
+        Specify a username and password with: ~mongodb://username:password@host/db~.
+   - HTTP_PORT :: Alternative port on which to start the web service
+   - MANIFEST_URL :: The URL where the GTFS zip manifest lives
+   - MANIFEST_DOWNLOAD_TO :: The path where the zip manifest should be saved
+   - TRIP_UPDATES_URL :: Specify a URL to poll for Trip Updates
+
+   You can also set these are Java system properties on start up. The system
+   properties are the same as the environment variales, except downcased and
+   with periods replacing underscores. To set MONGO_URI, for instance, set the
+   ~mongo.uri~ system property.
+
+** Building
+   - ~lein uberjar~
+     This will create two new .jar files in your ~target~ directory. Run the
+     standalone jar with ~java -jar target/mbta-xtras-<version>-standalone.jar~.
+     

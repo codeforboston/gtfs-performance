@@ -19,4 +19,5 @@
                  [org.clojure/test.check "0.9.0"]]
   :java-source-paths ["src/java"]
   :main mbta-xtras.system
+  :repl-options {:init-ns mbta-xtras.repl}
   :uberjar {:aot :all})

@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def gtfs-path "resources/MBTA_GTFS.zip")
+(def gtfs-path
+  (env :manifest-download-to "resources/MBTA_GTFS.zip"))
 
 (def feed-info-url
   (env :feed-info-url
