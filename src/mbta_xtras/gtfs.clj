@@ -16,6 +16,8 @@
   (env :manifest-url
        "http://www.mbta.com/uploadedfiles/MBTA_GTFS.zip"))
 
+(defonce agencies (atom {}))
+
 (defn download-zip
   "Saves the GTFS file specified in the environment to file and returns a
   corresponding File"
@@ -60,6 +62,8 @@
     (map (vec->map fields) rows)))
 
 (defn get-csv [gtfs-path file-name]
+  (when-not (.exists (io/file gtfs-path))
+    (download-zip gtfs-path))
   (-> (zip-reader gtfs-path file-name)
       (read-csv)
       (csv-to-maps)))
@@ -77,4 +81,10 @@
   (get-csv gtfs-path "shapes.txt"))
 
 (defn get-agencies []
-  (get-csv gtfs-path "agencies.txt"))
+  (into {} (map (juxt :agency-id identity))
+        (get-csv gtfs-path "agency.txt")))
+
+(defn agency-info [id]
+  (or (get @agencies id)
+      (let [info (swap! agencies merge (get-agencies))]
+        (get info id))))

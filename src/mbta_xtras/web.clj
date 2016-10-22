@@ -9,7 +9,8 @@
   (start [this]
     (assoc this
            :webserver (http/start-server
-                       (make-app (-> this :mongo :conn))
+                       (make-app (-> this :mongo :conn)
+                                 (-> this :mongo :db))
                        {:port port})))
 
   (stop [this]

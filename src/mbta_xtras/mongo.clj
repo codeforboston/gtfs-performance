@@ -28,8 +28,7 @@
   component/Lifecycle
   (start [this]
     (cond-> this
-      (not (:mongo this))
-      (merge this
+      (not (:mongo this)) (merge this
              (let [m (mg/connect-via-uri uri)]
                (setup-db (:db m))
                {:conn (:conn m)
@@ -42,4 +41,3 @@
 
 (defn make-mongo []
   (->MongoDB (env :mongo-uri "mongodb://localhost/mbta")))
-

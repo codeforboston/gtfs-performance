@@ -6,10 +6,6 @@
             [mbta-xtras.gtfs :as gtfs]
             [clojure.string :as str]))
 
-;; (def *mongo-uri
-;;   "mongodb://mbtafyi:3KIJ6Hpb0FXJleeJsRKv1PhbaYblD7ca9H5qO9UvrIoyKHbnFfTFpTZtsTsTuFfLlNUZpbJSmXqaqGsKh3pQ9Q==@mbtafyi.documents.azure.com:10250/mbta?ssl=true")
-;; (def *mongo (mg/connect-via-uri *mongo-uri))
-;; (def *db (:db *mongo))
 
 (defn get-db [conn]
   (mg/get-db conn "mbta"))
@@ -56,6 +52,9 @@
   (mc/find-maps db "stop-times" {:trip-id trip-id}
                 {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1}))
 
+(defn drop-trip-stops! [db]
+  (mc/drop db "trip-stops"))
+
 ;; Shapes
 (defn make-shapes [shape-points]
   (map (fn [points]
@@ -81,6 +80,7 @@
 (defn insert-trips! [db]
   (mc/insert-batch db "trips"
                    (map process-trip (gtfs/get-trips))))
+
 
 (defn drop-all! [db]
   (doseq [coll ["stops" "trips" "shapes"]]
@@ -112,8 +112,3 @@
                 (build-stop-query params)
                 {:_id 0}))
 
-(comment
-  (setup-db *db)
-  (mc/find-maps *db "stops" {:stop-name #"Harvard"})
-  (find-closest-stop *db 42.37336 -71.1189)
-  (insert-stops! *db))
