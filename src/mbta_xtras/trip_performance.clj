@@ -98,6 +98,10 @@
                      :scheduled-arrival sched}))))
          (sort-by :stop-sequence))))
 
+(defn travel-times
+  [db from-stop to-stop from-datetime to-datetime]
+  (let []))
+
 (defn read-updates-into-db
   "Pull trip stop updates continually and insert them into the given Mongo
   database and column. Returns a stop channel that will halt fetching of results

@@ -23,31 +23,52 @@
 (defn error-message [expl]
   (map explain-problem (::s/problems expl)))
 
-(defn find-stops [{:keys [mongo params]}]
-  {:status 200
-   :headers {"Content-type" "application/json"}
-   :body (json/write-str (db/find-stops mongo params))})
+(defn api-endpoint [spec f]
+  (fn [{:keys [params] :as req}]
+    (if-let [expl (s/explain-data spec params)]
+      {:status 400
+       :headers {"Content-type" "application/json"}
+       :body (json/write-str {:errors (error-message expl)
+                              :request-params params})}
 
-(defn trip-performance [{:keys [db params]}]
-  (if-let [expl (s/explain-data ::api/trip-performance-request params)]
-    {:status 400
-     :headers {"Content-type" "application/json"}
-     :body (json/write-str
-            {:errors (error-message expl)
-             :request-params params})}
+      (f req))))
 
+(defn wrap-json [x]
+  (if (map? x)
+    x
     {:status 200
      :headers {"Content-type" "application/json"}
-     :body (json/write-str
-            (let [results (trip/trip-performance db
-                                                 (:trip-id params)
-                                                 (:trip-start params))]
-              {:performance results}))}))
+     :body x}))
+
+(defmacro defapi [name spec params & body]
+  `(def ~name (api-endpoint ~spec (fn ~params
+                                    (wrap-json ~@body)))))
+
+(defapi find-stops ::api/find-stops-query
+  [{:keys [db params]}]
+  (json/write-str (db/find-stops db params)))
+
+(defapi trip-performance ::api/trip-performance-request
+  [{:keys [db params]}]
+  (json/write-str
+   (let [results (trip/trip-performance db
+                                        (:trip-id params)
+                                        (:trip-start params))]
+     {:performance results})))
+
+(defapi travel-times ::api/travel-times-request
+  [{:keys [db params]}]
+  (let [{:keys [from-datetime to-datetime
+                from-stop to-stop]} params]
+    (trip/travel-times db from-stop to-stop
+                       (Long/parseLong from-datetime)
+                       (Long/parseLong to-datetime))))
 
 (defroutes handler
   (context "/xapi" []
            (GET "/find_stops" []  find-stops)
-           (GET "/trip_performance" []  trip-performance)))
+           (GET "/trip_performance" []  trip-performance)
+           (GET "/travel_times" [] travel-times)))
 
 (def app
   (-> #'handler
