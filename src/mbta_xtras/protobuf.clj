@@ -46,6 +46,7 @@
                      {:stop-id (.getStopId stop-update)
                       :stop-sequence (.getStopSequence stop-update)
                       :arrival-time (.. stop-update getArrival getTime)
+                      :departure-time (.. stop-update getDeparture getTime)
                       :trip-id trip-id
                       :trip-start start-date
                       ;; Unique ID.  We may get multiple updates for the same
