@@ -17,19 +17,12 @@
 
 
 (defn get-trip-updates
-  "Retrieve the latest TripUpdates from the specified URL, or from the default."
-  [& [url]]
-  (get-feed (or url trip-updates-url)))
-
-
-(defn get-trip-updates
-  "Note that since this is designed with the MBTA's GTFS-RT feed in mind, the
+  "Retrieve the latest TripUpdates from the specified URL, or from the default.
+  Note that since this is designed with the MBTA's GTFS-RT feed in mind, the
   update types (trip, vehicle, alert) are delivered on separate feed."
-  []
-  (let [updates (get-feed trip-updates-url)]
-    (println (count (.getEntityList updates)))
-    updates))
-
+  [& [url]]
+  (print "polling")(flush)
+  (get-feed (or url trip-updates-url)))
 
 (defn timestamp [u]
   (.. u getHeader getTimestamp))

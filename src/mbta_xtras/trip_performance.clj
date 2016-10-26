@@ -14,11 +14,7 @@
 (defn prep-collection [db mongo-coll]
   (mc/ensure-index db mongo-coll
                    (array-map :stop-id 1, :arrival-time 1))
-  ;; Not currently supported by Azure DocumentDB:
-  #_
-  (mc/ensure-index db mongo-coll
-                   (array-map :trip-stop-id 1)
-                   {:unique true}))
+  (mc/ensure-index db mongo-coll (array-map :id 1) {:unique true}))
 
 
 ;; java.time helpers
@@ -74,15 +70,52 @@
   (let [ref-date (datetime-for-str start-date)]
     (map (fn [stop-time]
            [(Integer/parseInt (:stop-sequence stop-time))
-            (->> (:arrival-time stop-time)
-                 (offset-time ref-date)
-                 (.toInstant)
-                 (.getEpochSecond))]))))
+            (-> stop-time
+                (dissoc :_id)
+                (assoc :stop-sequence (Integer/parseInt (:stop-sequence stop-time))
+                       :scheduled-arrival (->> (:arrival-time stop-time)
+                                               (offset-time ref-date)
+                                               (.toInstant)
+                                               (.getEpochSecond))))]))))
 
-(defn scheduled-arrivals [db trip-id start-date]
+(defn scheduled-arrivals
+  "Returns a map of scheduled stop arrival times, indexed by the stop sequence."
+  [db trip-id start-date]
   (into (sorted-map)
         (transduce-stop-times start-date)
         (mc/find-maps db "stop-times" {:trip-id trip-id})))
+
+(defn index-by [k coll]
+  (into {} (map (juxt k identity)) coll))
+
+
+(defn trip-performance
+  "Take the observed trip stop updates and the scheduled stop arrival times and
+  use them to calculate how far ahead or behind schedule each stop of the trip
+  was. When there is no information about a trip's arrival time at a stop,
+  calculate it by "
+  [db trip-id start-date]
+  (let [scheduled (scheduled-arrivals db trip-id start-date)
+        trip-stops (mc/find-maps db "trip-stops" {:trip-id trip-id
+                                                  :trip-start start-date})]
+    (->> (partition 2 1 trip-stops)
+         (mapcat (fn [[from-stop to-stop]]
+                   (let [start (:stop-sequence from-stop)
+                         end (:stop-sequence to-stop)
+                         sched-start (:scheduled-arrival (scheduled start))
+                         total-sched (- (:scheduled-arrival (scheduled end)) sched-start)
+                         total-obs (- (:arrival-time to-stop)
+                                      (:arrival-time from-stop))]
+                     (map (fn [sched]
+                            (let [percent (/ (- (:arrival-time sched)
+                                                sched-start) total-sched)]
+                              [(:stop-sequence sched)
+                               {:arrival-time (* percent total-obs)
+                                :departure-time nil ;; use scheduled dwell time
+                                :estimated? true}]))
+                          (map #(get scheduled %) (range (inc start) end))))))
+         (into {}))))
+
 
 (defn trip-performance
   ""

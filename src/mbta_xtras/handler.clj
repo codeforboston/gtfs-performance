@@ -10,15 +10,22 @@
             [clojure.string :as str]))
 
 
+(defn explain-pred [pred]
+  (case (first pred)
+    contains? (str "missing parameter: " (name (last pred)))
+
+    (or and) (str/join (str " " (str/upper-case (str (first pred))) " ")
+                       (map #(str "(" (explain-pred %) ")") (rest pred)))
+
+    (re-matches re-find) (str "doesn't match pattern: "
+                              (second pred))
+    (str "doesn't match predicate: " pred)))
+
 (defn explain-problem [{:keys [path pred]}]
   (str (when path
          (str (str/join "." (map name path)) " "))
 
-       (case (first pred)
-         contains? (str "missing parameter: " (name (last pred)))
-         (re-matches re-find) (str "doesn't match pattern: "
-                                   (second pred))
-         (str "doesn't match predicate: " pred))))
+       (explain-pred pred)))
 
 (defn error-message [expl]
   (map explain-problem (::s/problems expl)))
@@ -64,11 +71,23 @@
                        (Long/parseLong from-datetime)
                        (Long/parseLong to-datetime))))
 
+(defapi trips-for-stop ::api/trips-for-stop-request
+  [{:keys [db params]}]
+  (db/find-trips-for-stop db (:stop-id params)))
+
+(defapi trip-updates ::api/trip-updates-request
+  [{:keys [db params]}]
+  (let [{:keys [trip-id trip-start]} params]
+    (json/write-str
+     (db/trip-updates db trip-id trip-start))))
+
 (defroutes handler
   (context "/xapi" []
            (GET "/find_stops" []  find-stops)
            (GET "/trip_performance" []  trip-performance)
-           (GET "/travel_times" [] travel-times)))
+           (GET "/travel_times" [] travel-times)
+           (GET "/trips_for_stop" [] trips-for-stop)
+           (GET "/trip_updates" [] trip-updates)))
 
 (def app
   (-> #'handler

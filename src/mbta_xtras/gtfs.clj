@@ -18,6 +18,8 @@
        "http://www.mbta.com/uploadedfiles/MBTA_GTFS.zip"))
 
 (defonce agencies (atom {}))
+(defonce feed-info (atom nil))
+(defonce calendar (atom nil))
 
 (defn download-zip
   "Saves the GTFS file specified in the environment to file and returns a
@@ -42,11 +44,14 @@
        (csv-vals)
        (map (comp keyword hyphenate))))
 
-(defn get-feed-info []
+(defn get-latest-feed-info []
   (let [body (line-seq (io/reader (java.net.URL. feed-info-url)))
         ks (line->keys (first body))
         vals (csv-vals (second body))]
     (into {} (map vector ks vals))))
+
+(defn get-last-feed-info []
+  )
 
 (defn zip-reader
   [zip-path resource]
@@ -85,7 +90,14 @@
   (into {} (map (juxt :agency-id identity))
         (get-csv gtfs-path "agency.txt")))
 
+(defn get-calendar []
+  (into {} (map (juxt :service-id identity))
+        (get-csv gtfs-path "calendar.txt")))
+
 (defn agency-info [id]
-  (or (get @agencies id)
-      (let [info (swap! agencies merge (get-agencies))]
-        (get info id))))
+  (get (or @agencies (swap! agencies merge (get-agencies))) id))
+
+(defn service-calendar [service-id]
+  (get (or @calendar
+           (reset! calendar (get-calendar)))
+       service-id))

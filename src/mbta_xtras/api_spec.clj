@@ -20,6 +20,7 @@
 (s/def ::q string?)
 (s/def ::find-stops-query
   (s/keys :req-un [(or ::q (and ::lat ::lon) (and ::q ::lat ::lon))]))
+
 (s/def ::trip-performance-request
   (s/keys :req-un [::trip-id ::trip-start]))
 
@@ -28,5 +29,10 @@
 (s/def ::from-stop ::stop-id)
 (s/def ::to-stop ::stop-id)
 (s/def ::travel-times-request
-  (s/keys :req-un [::from-datetime ::to-datetime
-                   ::from-stop ::to-stop]))
+  (s/keys :req-un [::from-datetime ::to-datetime ::from-stop ::to-stop]))
+
+(s/def ::trips-for-stop-request
+  (s/keys :req-un [::stop-id]))
+
+(s/def ::trip-updates-request
+  (s/keys ::req-un [::trip-id ::trip-start]))
