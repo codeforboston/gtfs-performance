@@ -58,6 +58,9 @@
         (.withMinute (Long/parseLong m))
         (.withSecond (Long/parseLong s)))))
 
+(defn ->stamp [dt]
+  (.getEpochSecond (.toInstant dt)))
+
 (defn trip-ids-for-date
   ([db date-str]
    (into #{} (map :trip-id)
@@ -68,72 +71,110 @@
 (defn- transduce-stop-times
   [start-date]
   (let [ref-date (datetime-for-str start-date)]
-    (map (fn [stop-time]
-           [(Integer/parseInt (:stop-sequence stop-time))
-            (-> stop-time
-                (dissoc :_id)
-                (assoc :stop-sequence (Integer/parseInt (:stop-sequence stop-time))
-                       :scheduled-arrival (->> (:arrival-time stop-time)
-                                               (offset-time ref-date)
-                                               (.toInstant)
-                                               (.getEpochSecond))))]))))
+    (map (fn [{at :arrival-time, ss :stop-sequence, :as stop-time}]
+           [(Integer/parseInt ss)
+            (-> (dissoc stop-time :_id)
+                (assoc :stop-sequence (Integer/parseInt ss)
+                       :scheduled-arrival (->stamp (offset-time ref-date at))
+                       :scheduled? true))]))))
 
-(defn scheduled-arrivals
-  "Returns a map of scheduled stop arrival times, indexed by the stop sequence."
+(defn stop-times
   [db trip-id start-date]
   (into (sorted-map)
         (transduce-stop-times start-date)
         (mc/find-maps db "stop-times" {:trip-id trip-id})))
 
+(defn scheduled-arrivals
+  "Returns a map of scheduled stop arrival times, indexed by the stop sequence."
+  [db trip-id start-date]
+  (into (sorted-map)
+        (let [ref-date (datetime-for-str start-date)]
+          (map (fn [{at :arrival-time, ss :stop-sequence}]
+                 [(Integer/parseInt ss) (->stamp (offset-time ref-date at))])))
+        (mc/find-maps db "stop-times" {:trip-id trip-id})))
+
+(defn add-stop-delay
+  [scheduled stop]
+  (when-let [sched (scheduled (:stop-sequence stop))]
+    (merge
+     (dissoc stop :_id)
+     {:delay (- (:arrival-time stop) sched)
+      :scheduled-arrival sched})))
+
+(defn observed-trip-performance
+  [db trip-id start-date]
+  (let [scheduled (scheduled-arrivals db trip-id start-date)]
+    (->> (mc/find-maps db "trip-stops" {:trip-id trip-id,
+                                        :trip-start start-date})
+         (keep (partial add-stop-delay scheduled))
+         (sort-by :stop-sequence))))
+
 (defn index-by [k coll]
   (into {} (map (juxt k identity)) coll))
 
+
+(defn all-stops
+  "Merge the stops into a single sequence, ordered by :stop-sequence."
+  [scheduled actual]
+  (map (fn [i] (or (actual i) (scheduled i)))
+       (range 1 (inc (count scheduled)))))
+
+(defn add-estimates [all-stops & [last-obs]]
+  (when-let [l (seq all-stops)]
+    (let [[sched actual] (partition-by :scheduled? l)]
+      (concat (if-let [next-obs (first actual)]
+                (if-let [last-arrival (:arrival-time last-obs)]
+                  ;; We have observed arrival times for the stops flanking this
+                  ;; subsequence of scheduled stops, so we'll 'spread' the
+                  ;; (positive or negative) delay over the stops between the
+                  ;; observed stops. Use the scheduled to determine the
+                  ;; proportion of the total trip that each stop represents and
+                  ;; scale the additional delay appropriately.
+                  (let [obs-duration (- (:arrival-time next-obs) last-arrival)
+                        sch-duration (- (:scheduled-arrival next-obs) (:scheduled-arrival last-obs))]
+                    (map (fn [scheduled-stop]
+                           (let [delay (* (/ (- (:scheduled-arrival scheduled-stop)
+                                                (:scheduled-arrival last-obs))
+                                             sch-duration)
+                                          obs-duration)]
+                             (assoc scheduled-stop
+                                    :arrival-time (+ last-arrival delay)
+                                    :delay delay
+                                    :estimation-method "interpolated"
+                                    :estimated? true)))
+                         sched))
+                  ;; We don't have information about the last arrival, but we do
+                  ;; have the next observed arrival, so shift the whole schedule over
+                  (let [shift (- (:arrival-time next-obs)
+                                 (:scheduled-arrival next-obs))]
+                    (map (fn [scheduled-stop]
+                           (assoc scheduled-stop
+                                  :arrival-time (+ shift
+                                                   (:scheduled-arrival scheduled-stop))
+                                  :delay shift
+                                  :estimation-method "shifted"
+                                  :estimated? true))
+                         sched)))
+
+                ;; We have only the schedule! Don't bother estimating.
+                sched)
+
+              (add-estimates actual)))))
 
 (defn trip-performance
   "Take the observed trip stop updates and the scheduled stop arrival times and
   use them to calculate how far ahead or behind schedule each stop of the trip
   was. When there is no information about a trip's arrival time at a stop,
-  calculate it by "
+  estimate it using either interpolation or shifting, depending on the
+  information available."
   [db trip-id start-date]
-  (let [scheduled (scheduled-arrivals db trip-id start-date)
-        trip-stops (mc/find-maps db "trip-stops" {:trip-id trip-id
-                                                  :trip-start start-date})]
-    (->> (partition 2 1 trip-stops)
-         (mapcat (fn [[from-stop to-stop]]
-                   (let [start (:stop-sequence from-stop)
-                         end (:stop-sequence to-stop)
-                         sched-start (:scheduled-arrival (scheduled start))
-                         total-sched (- (:scheduled-arrival (scheduled end)) sched-start)
-                         total-obs (- (:arrival-time to-stop)
-                                      (:arrival-time from-stop))]
-                     (map (fn [sched]
-                            (let [percent (/ (- (:arrival-time sched)
-                                                sched-start) total-sched)]
-                              [(:stop-sequence sched)
-                               {:arrival-time (* percent total-obs)
-                                :departure-time nil ;; use scheduled dwell time
-                                :estimated? true}]))
-                          (map #(get scheduled %) (range (inc start) end))))))
-         (into {}))))
+  (let [scheduled (stop-times db trip-id start-date)
+        trip-stops (->> (mc/find-maps db "trip-stops" {:trip-id trip-id
+                                                       :trip-start start-date})
+                        (keep (partial add-stop-delay (comp :scheduled-arrival scheduled)))
+                        (index-by :stop-sequence))]
+    (add-estimates (all-stops scheduled trip-stops))))
 
-
-(defn trip-performance
-  ""
-  [db trip-id start-date]
-  (let [scheduled (scheduled-arrivals db trip-id start-date)]
-    (->> (mc/find-maps db "trip-stops" {:trip-id trip-id,
-                                        :trip-start start-date})
-         (keep (fn [stop]
-                 (when-let [sched (get scheduled (:stop-sequence stop))]
-                   (merge
-                    (dissoc stop :_id)
-                    {:delay (- (:arrival-time stop) sched)
-                     :scheduled-arrival sched}))))
-         (sort-by :stop-sequence))))
-
-(defn travel-times
-  [db from-stop to-stop from-datetime to-datetime]
-  (let []))
 
 (defn read-updates-into-db
   "Pull trip stop updates continually and insert them into the given Mongo

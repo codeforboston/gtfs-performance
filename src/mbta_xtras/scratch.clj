@@ -1,7 +1,8 @@
 (ns mbta-xtras.scratch
   (:require [clojure.core.async :refer [>! chan go-loop timeout]]
             [clojure.java.io :as io]
-            [mbta-xtras.db :as db])
+            [mbta-xtras.db :as db]
+            [monger.collection :as mc])
 
   (:import clojure.lang.Reflector
            com.google.protobuf.CodedInputStream
@@ -89,3 +90,31 @@
   ([u]
    (find-delays u (timestamp u))))
 
+(defn trip-performance
+  "Take the observed trip stop updates and the scheduled stop arrival times and
+  use them to calculate how far ahead or behind schedule each stop of the trip
+  was. When there is no information about a trip's arrival time at a stop,
+  calculate it by taking the first known "
+  [db trip-id start-date]
+  (let [scheduled (stop-times db trip-id start-date)
+        trip-stops (sort-by :stop-sequence
+                            (mc/find-maps db "trip-stops" {:trip-id trip-id
+                                                           :trip-start start-date}))]
+    (->> (concat (mapcat (fn [[from-stop to-stop]]
+                           (let [start (:stop-sequence from-stop)
+                                 end (:stop-sequence to-stop)
+                                 sched-start (:scheduled-arrival (scheduled start))
+                                 total-sched (- (:scheduled-arrival (scheduled end)) sched-start)
+                                 total-obs (- (:arrival-time to-stop)
+                                              (:arrival-time from-stop))]
+                             (map (fn [sched]
+                                    (let [percent (/ (- (:arrival-time sched)
+                                                        sched-start) total-sched)]
+                                      [(:stop-sequence sched)
+                                       {:arrival-time (* percent total-obs)
+                                        :departure-time nil ;; use scheduled dwell time
+                                        :estimated? true}]))
+                                  (map #(get scheduled %) (range (inc start) end)))))
+                         (partition 2 1 trip-stops))
+                 (keep (partial add-stop-delay (comp :scheduled-arrival scheduled)) trip-stops))
+         (sort-by :stop-sequence))))
