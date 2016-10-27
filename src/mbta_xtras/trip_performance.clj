@@ -121,45 +121,49 @@
 
 (defn add-estimates [all-stops & [last-obs]]
   (when-let [l (seq all-stops)]
-    (let [[sched actual] (partition-by :scheduled? l)]
-      (concat (if-let [next-obs (first actual)]
-                (if-let [last-arrival (:arrival-time last-obs)]
-                  ;; We have observed arrival times for the stops flanking this
-                  ;; subsequence of scheduled stops, so we'll 'spread' the
-                  ;; (positive or negative) delay over the stops between the
-                  ;; observed stops. Use the scheduled to determine the
-                  ;; proportion of the total trip that each stop represents and
-                  ;; scale the additional delay appropriately.
-                  (let [obs-duration (- (:arrival-time next-obs) last-arrival)
-                        sch-duration (- (:scheduled-arrival next-obs) (:scheduled-arrival last-obs))]
-                    (map (fn [scheduled-stop]
-                           (let [delay (* (/ (- (:scheduled-arrival scheduled-stop)
-                                                (:scheduled-arrival last-obs))
-                                             sch-duration)
-                                          obs-duration)]
+    (let [[sched actual] (split-with :scheduled? l)]
+      (if (seq sched)
+        (concat (if-let [next-obs (first actual)]
+                  (if-let [last-arrival (:arrival-time last-obs)]
+                    ;; We have observed arrival times for the stops flanking this
+                    ;; subsequence of scheduled stops, so we'll 'spread' the
+                    ;; (positive or negative) delay over the stops between the
+                    ;; observed stops. Use the scheduled to determine the
+                    ;; proportion of the total trip that each stop represents and
+                    ;; scale the additional delay appropriately.
+                    (let [obs-duration (- (:arrival-time next-obs) last-arrival)
+                          sch-duration (- (:scheduled-arrival next-obs) (:scheduled-arrival last-obs))]
+                      (map (fn [scheduled-stop]
+                             (let [delay (* (/ (- (:scheduled-arrival scheduled-stop)
+                                                  (:scheduled-arrival last-obs))
+                                               sch-duration)
+                                            obs-duration)]
+                               (assoc scheduled-stop
+                                      :arrival-time (+ last-arrival delay)
+                                      :delay delay
+                                      :estimation-method "interpolated"
+                                      :estimated? true)))
+                           sched))
+                    ;; We don't have information about the last arrival, but we do
+                    ;; have the next observed arrival, so shift the whole schedule over
+                    (let [shift (- (:arrival-time next-obs)
+                                   (:scheduled-arrival next-obs))]
+                      (map (fn [scheduled-stop]
                              (assoc scheduled-stop
-                                    :arrival-time (+ last-arrival delay)
-                                    :delay delay
-                                    :estimation-method "interpolated"
-                                    :estimated? true)))
-                         sched))
-                  ;; We don't have information about the last arrival, but we do
-                  ;; have the next observed arrival, so shift the whole schedule over
-                  (let [shift (- (:arrival-time next-obs)
-                                 (:scheduled-arrival next-obs))]
-                    (map (fn [scheduled-stop]
-                           (assoc scheduled-stop
-                                  :arrival-time (+ shift
-                                                   (:scheduled-arrival scheduled-stop))
-                                  :delay shift
-                                  :estimation-method "shifted"
-                                  :estimated? true))
-                         sched)))
+                                    :arrival-time (+ shift
+                                                     (:scheduled-arrival scheduled-stop))
+                                    :delay shift
+                                    :estimation-method "shifted"
+                                    :estimated? true))
+                           sched)))
 
-                ;; We have only the schedule! Don't bother estimating.
-                sched)
+                  ;; We have only the schedule! Don't bother estimating.
+                  sched)
 
-              (add-estimates actual)))))
+                (add-estimates actual))
+
+        (let [[actual rest] (split-with (complement :scheduled?) actual)]
+          (concat actual (add-estimates rest (last actual))))))))
 
 (defn trip-performance
   "Take the observed trip stop updates and the scheduled stop arrival times and
