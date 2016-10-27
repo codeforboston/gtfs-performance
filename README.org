@@ -17,11 +17,16 @@
    convenience. ~(stop-mongo)~ will close the connection.
    
 ** Environment Variables
+   Configuration of the application is done entirely through environment
+   variables and/or Java system properties.
+
    - MONGO_URI :: This should be a URI of the form ~mongodb://<host>/db~.
         Specify a username and password with: ~mongodb://username:password@host/db~.
    - HTTP_PORT :: Alternative port on which to start the web service
    - MANIFEST_URL :: The URL where the GTFS zip manifest lives
    - MANIFEST_DOWNLOAD_TO :: The path where the zip manifest should be saved
+   - MBTA_API_KEY :: An MBTA-specific setting, used when communicating with the
+        [[http://realtime.mbta.com/Portal/Home/Documents][Realtime API]].
    - TRIP_UPDATES_URL :: Specify a URL to poll for Trip Updates
 
    You can also set these are Java system properties on start up. The system
