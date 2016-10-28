@@ -4,6 +4,7 @@
             [monger.operators :refer [$near]]
 
             [mbta-xtras.gtfs :as gtfs]
+            [mbta-xtras.realtime :as rt]
             [clojure.string :as str]
             [mbta-xtras.db :as db]))
 
@@ -51,8 +52,13 @@
     (mc/insert-batch db "stop-times" stop-times-group)))
 
 (defn stop-times-for-trip [db trip-id]
-  (mc/find-maps db "stop-times" {:trip-id trip-id}
-                {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1}))
+  (let [stop-times (mc/find-maps db "stop-times" {:trip-id trip-id}
+                                 {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1})]
+    (if (seq stop-times)
+      stop-times
+
+      (when-let [api-trip (rt/get-trip trip-id)]
+        ))))
 
 (defn drop-trip-stops! [db]
   (mc/drop db "trip-stops"))
@@ -123,6 +129,7 @@
   "Determines "
   [db trip-id dt]
   (let [{:keys [service-id]} (mc/find-one-as-map db "trips" {:trip-id trip-id})]))
+
 
 (defn find-trips-for-stop [db stop-id]
   (mc/distinct db "stop-times" :trip-id {:stop-id stop-id}))

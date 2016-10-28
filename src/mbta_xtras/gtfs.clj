@@ -1,6 +1,7 @@
 (ns mbta-xtras.gtfs
   "Some utilities for reading a zipped GTFS manifest."
-  (:require [environ.core :refer [env]]
+  (:require [aleph.http :as http]
+            [environ.core :refer [env]]
             [clojure.data.csv :refer [read-csv]]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -16,6 +17,7 @@
   "The URL for the zip file containing the full trip information."
   (env :manifest-url
        "http://www.mbta.com/uploadedfiles/MBTA_GTFS.zip"))
+
 
 (defonce agencies (atom {}))
 (defonce feed-info (atom nil))
@@ -36,23 +38,6 @@
 (defn- hyphenate [s]
   (str/replace s #"[_.]" "-"))
 
-(defn- csv-vals [line]
-  (map second (re-seq #"\"([^\"]+)\"" line)))
-
-(defn- line->keys [line]
-  (->> line
-       (csv-vals)
-       (map (comp keyword hyphenate))))
-
-(defn get-latest-feed-info []
-  (let [body (line-seq (io/reader (java.net.URL. feed-info-url)))
-        ks (line->keys (first body))
-        vals (csv-vals (second body))]
-    (into {} (map vector ks vals))))
-
-(defn get-last-feed-info []
-  )
-
 (defn zip-reader
   [zip-path resource]
   (let [zip (java.util.zip.ZipFile. zip-path)]
@@ -66,6 +51,12 @@
 (defn csv-to-maps [[header & rows]]
   (let [fields (map (comp keyword hyphenate) header)]
     (map (vec->map fields) rows)))
+
+(defn get-latest-feed-info []
+  (-> (io/reader (java.net.URL. feed-info-url))
+      (read-csv)
+      (csv-to-maps)
+      (first)))
 
 (defn get-csv [gtfs-path file-name]
   (when-not (.exists (io/file gtfs-path))

@@ -13,6 +13,8 @@
   (mc/ensure-index db "shapes" (array-map :path "2dsphere"))
 
   (mc/ensure-index db "trips" (array-map :shape-id 1))
+  (mc/ensure-index db "trips" (array-map :trip-id 1))
+  (mc/ensure-index db "trips" (array-map :route-id 1))
 
   (mc/ensure-index db "stop-times" (array-map :trip-id 1))
   (mc/ensure-index db "stop-times" (array-map :stop-id 1))

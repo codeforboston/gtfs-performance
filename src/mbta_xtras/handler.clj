@@ -3,9 +3,12 @@
             [compojure.core :refer [context defroutes GET POST]]
             [ring.middleware.keyword-params :refer [wrap-keyword-params]]
             [ring.middleware.params :refer [wrap-params]]
+
             [mbta-xtras.api-spec :as api :refer [defapi]]
             [mbta-xtras.db :as db]
             [mbta-xtras.trip-performance :as trip]
+            [mbta-xtras.utils :refer [keyfn]]
+
             [clojure.spec :as s]
             [clojure.string :as str]))
 
@@ -39,6 +42,16 @@
   {:status 501
    :body "Not implemented"})
 
+(defapi daily-metrics ::api/daily-metrics-request
+  [_]
+  {:status 501
+   :body "Not implemented"})
+
+(defapi current-metrics ::api/current-metrics-request
+  [_]
+  {:status 501
+   :body "Not implemented"})
+
 (defapi trips-for-stop ::api/trips-for-stop-request
   [{:keys [db params]}]
 
@@ -48,7 +61,8 @@
   [{:keys [db params]}]
   (let [{:keys [trip-id trip-start]} params]
     (json/write-str
-     (db/trip-updates db trip-id trip-start))))
+     (db/trip-updates db trip-id trip-start)
+     :key-fn keyfn)))
 
 (defroutes handler
   (context "/xapi" []
