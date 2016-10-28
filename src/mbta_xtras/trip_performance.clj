@@ -179,6 +179,8 @@
                         (index-by :stop-sequence))]
     (add-estimates (all-stops scheduled trip-stops))))
 
+(defn travel-times [db from-stop to-stop from-dt to-dt]
+  )
 
 (defn read-updates-into-db
   "Pull trip stop updates continually and insert them into the given Mongo

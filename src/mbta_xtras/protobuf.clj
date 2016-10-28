@@ -3,7 +3,8 @@
             [clojure.java.io :as io]
             [clojure.spec :as s]
             [environ.core :refer [env]]
-            [mbta-xtras.db :as db])
+            [mbta-xtras.db :as db]
+            [taoensso.timbre :refer [log info error]])
 
   (:import [com.google.transit.realtime GtfsRealtime$FeedMessage]))
 
@@ -21,7 +22,7 @@
   Note that since this is designed with the MBTA's GTFS-RT feed in mind, the
   update types (trip, vehicle, alert) are delivered on separate feed."
   [& [url]]
-  (print "polling")(flush)
+  (info "Retrieving trip updates")
   (get-feed (or url trip-updates-url)))
 
 (defn timestamp [u]
@@ -73,7 +74,8 @@
                             ;; due to transient network issues, quotas, or (I
                             ;; suspect) non-atomic writing to the protobuf on
                             ;; the part of the MBTA.
-                            (catch Exception ex (prn ex)))]
+                            (catch Exception ex
+                              (error ex "encountered while fetching trip updates")))]
         (let [stamp (.. updates getHeader getTimestamp)]
           (when (> stamp last-stamp)
             (doseq [update (->> (trip-updates updates)
