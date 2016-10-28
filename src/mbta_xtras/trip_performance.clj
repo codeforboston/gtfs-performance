@@ -1,81 +1,41 @@
 (ns mbta-xtras.trip-performance
   (:require [clojure.core.async :as async :refer [<! go-loop]]
+            [clojure.spec :as s]
             [environ.core :refer [env]]
             [com.stuartsierra.component :as component]
+
+            [mbta-xtras.api-spec :as api]
             [mbta-xtras.protobuf :refer [trip-updates->!]]
+            [mbta-xtras.utils :refer [datetime-for-stamp datetime-for-str
+                                      date-str offset-time ->stamp]]
             [monger
              [collection :as mc]
              [core :as mg]])
-  (:import [java.time LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
-           [java.time.format DateTimeFormatter]
-           java.time.temporal.ChronoUnit))
+  (:import [java.time LocalDateTime]))
 
 
+;; Function definitions:
 (defn prep-collection [db mongo-coll]
   (mc/ensure-index db mongo-coll
                    (array-map :stop-id 1, :arrival-time 1))
   (mc/ensure-index db mongo-coll (array-map :id 1) {:unique true}))
-
-
-;; java.time helpers
-(defn datetime-for-stamp [stamp]
-  (LocalDateTime/from (Instant/ofEpochSecond stamp)))
-
-
-(def datetime-format (DateTimeFormatter/ofPattern "yyyyMMdd"))
-(defn datetime-for-str
-  ([date-str tz]
-   (-> date-str
-       (LocalDate/parse datetime-format)
-       (LocalDateTime/of LocalTime/MIDNIGHT)
-       (ZonedDateTime/of (ZoneId/of tz))))
-  ([date-str]
-   (datetime-for-str date-str "America/New_York")))
-
-(defn set-hours
-  [dt h]
-  (if (> h 23)
-    ;; Use plusDays and not simply plusHours, just in case there's a clock
-    ;; change on the reference day.
-    (-> dt
-        (.plusDays (quot h 24))
-        (.plusHours (rem h 24)))
-
-    (.withHour dt h)))
-
-;; In the manifest, trip stop times are reported as offsets from the start of
-;; the day when the trip runs.
-(defn offset-time
-  "Returns a new LocalDateTime that is offset from the reference date by the
-  number of hours, minutes, and seconds given in the time-str. The time-str has
-  the format hh:mm:ss, which is roughly the wall clock time, but it can be
-  bigger than 23 for trips that begin on one day and end the next day."
-  [ref-date time-str]
-  (let [[_ h m s] (re-find #"(\d\d?):(\d\d):(\d\d)" time-str)]
-    (-> ref-date
-        (.truncatedTo ChronoUnit/DAYS)
-        (set-hours (Long/parseLong h))
-        (.withMinute (Long/parseLong m))
-        (.withSecond (Long/parseLong s)))))
-
-(defn ->stamp [dt]
-  (.getEpochSecond (.toInstant dt)))
 
 (defn trip-ids-for-date
   ([db date-str]
    (into #{} (map :trip-id)
          (mc/find-maps db "trip-stops" {:trip-start date-str})))
   ([db]
-   (trip-ids-for-date db (.format datetime-format (LocalDateTime/now)))))
+   (trip-ids-for-date db (date-str (LocalDateTime/now)))))
 
 (defn- transduce-stop-times
   [start-date]
   (let [ref-date (datetime-for-str start-date)]
-    (map (fn [{at :arrival-time, ss :stop-sequence, :as stop-time}]
+    (map (fn [{at :arrival-time, dt :departure-time, ss :stop-sequence, :as stop-time}]
            [(Integer/parseInt ss)
             (-> (dissoc stop-time :_id)
                 (assoc :stop-sequence (Integer/parseInt ss)
                        :scheduled-arrival (->stamp (offset-time ref-date at))
+                       :scheduled-departure (->stamp (offset-time ref-date dt))
                        :scheduled? true))]))))
 
 (defn stop-times
@@ -119,7 +79,11 @@
   (map (fn [i] (or (actual i) (scheduled i)))
        (range 1 (inc (count scheduled)))))
 
-(defn add-estimates [all-stops & [last-obs]]
+(defn add-estimates
+  "Takes a joined sequence of stops, scheduled and unscheduled, ordered by stop
+  sequence. Finds any sub-sequences that have no observed arrival time and
+  attempts to  estimate their arrival times."
+  [all-stops & [last-obs]]
   (when-let [l (seq all-stops)]
     (let [[sched actual] (split-with :scheduled? l)]
       (if (seq sched)
@@ -179,8 +143,40 @@
                         (index-by :stop-sequence))]
     (add-estimates (all-stops scheduled trip-stops))))
 
-(defn travel-times [db from-stop to-stop from-dt to-dt]
-  )
+
+(defn travel-times
+  [db from-stop to-stop from-dt to-dt]
+  ;; See docs for a more detailed walkthrough
+  (let [from-stops (mc/find-maps db "trip-stops" {:stop-id from-stop
+                                                  :arrival-time {:$gte from-dt
+                                                                 :$lte to-dt}})
+        trip-ids (into #{} (map :trip-id) from-stops)
+        to-stops (mc/find-maps db "trip-stops" {:stop-id to-stop
+                                                :arrival-time {:$gte from-dt
+                                                               :$lte to-dt}
+                                                :trip-id {:$in trip-ids}})
+        trip-ends (index-by (juxt :trip-id :trip-start) to-stops)
+        trips (index-by :trip-id (mc/find-maps db "trips"
+                                               {:trip-id {:$in trip-ids}}
+                                               {:direction-id 1, :route-id 1,
+                                                :trip-id 1}))]
+
+    ;; For now, let's assume that all trip stops have gone through
+    ;; post-processing and have :scheduled-arrival, etc.
+    (keep (fn [from-stop]
+            (when-let [to-stop (trip-ends [(:trip-id from-stop)
+                                           (:start-date from-stop)])]
+              (let [bench (- (:scheduled-arrival to-stop)
+                             (:scheduled-departure from-stop))
+                    trip (trips (:trip-id from-stop))]
+                {:dep-dt (str (:departure-time from-stop))
+                 :arr-dt (str (:arrival-time to-stop))
+                 :travel-time-sec (- (:arrival-time to-stop) (:departure-time
+                                                              from-stop))
+                 :estimated? (or (:estimated? from-stop) (:estimated? to-stop))
+                 :benchmark-travel-time-sec bench
+                 :route-id (:route-id trip)
+                 :direction (:direction-id trip)}))))))
 
 (defn read-updates-into-db
   "Pull trip stop updates continually and insert them into the given Mongo
@@ -212,3 +208,4 @@
 
 (defn make-recorder []
   (->TripPerformanceRecorder (env :trip-stops-collection "trip-stops")))
+
