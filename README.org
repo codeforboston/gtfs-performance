@@ -29,7 +29,7 @@
         [[http://realtime.mbta.com/Portal/Home/Documents][Realtime API]].
    - TRIP_UPDATES_URL :: Specify a URL to poll for Trip Updates
 
-   You can also set these are Java system properties on start up. The system
+   You can also set these as Java system properties on start up. The system
    properties are the same as the environment variales, except downcased and
    with periods replacing underscores. To set MONGO_URI, for instance, set the
    ~mongo.uri~ system property.
@@ -39,3 +39,15 @@
      This will create two new .jar files in your ~target~ directory. Run the
      standalone jar with ~java -jar target/mbta-xtras-<version>-standalone.jar~.
      
+
+* Data Dumps
+ 
+  Since others might be interested in using the raw "trip-stops" data without
+  having to run a server, mongodb dumps of the collection will be posted on a
+  regular basis and will be available at the URL with the format:
+
+  http://mbta-static.apptic.xyz/mbtafyi/trip-stops_*YYYY_mm*.gz
+
+  To view a listing, in XML format, of the available files, see:
+
+  http://mbta-static.apptic.xyz/mbtafyi?restype=container&comp=list
