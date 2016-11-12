@@ -1,5 +1,6 @@
 """
-Script that dumps the contents of a
+Script that dumps the contents of the Mongo database's trip-stops
+collection, then uploads the dump to Blob Storage.
 """
 from datetime import datetime
 import json
@@ -19,7 +20,7 @@ def parse_uri(mongo_uri):
 
 def mongo_dump(since_stamp=None, before_stamp=None):
     """
-
+    Call the 'mongodump' utility to generate a zipped archive file.
     """
     if since_stamp:
         since_dt = datetime.fromtimestamp(since_stamp)
@@ -38,7 +39,10 @@ def mongo_dump(since_stamp=None, before_stamp=None):
         hostname = "localhost"
         db = "mbta"
     collection = os.environ.get("MONGO_COLLECTION", "trip-stops")
-    query = {"arrival-time": {"$gte": since_stamp}}
+    subquery = {"$gte": since_stamp}
+    if before_stamp:
+        subquery["$lt"] = before_stamp
+    query = {"arrival-time": subquery}
     outfile = "{collection}_{dt}.gz".format(collection=collection,
                                             dt=since_dt.strftime("%Y_%m"))
     subprocess.check_output(["mongodump",
@@ -58,9 +62,8 @@ def get_credentials():
     key = os.environ.get("AZURE_KEY")
     creds = {}
     if not name or not key:
-        creds_file = os.environ("AZURE_CREDENTIALS",
-                                os.path.join(os.path.dirname(__file__),
-                                            "credentials.json"))
+        creds_file = os.environ.get("AZURE_CREDENTIALS") or \
+                     os.path.join(os.path.dirname(__file__), "credentials.json")
         try:
             with open(creds_file) as f:
                 creds = json.load(f)
@@ -68,7 +71,8 @@ def get_credentials():
         except:
             pass
 
-    return (name or creds.get("account"), key or creds.get("account"))
+    return (name or creds.get("account"), key or creds.get("key"))
+
 
 def upload_blob(outfile):
     account_name, account_key = get_credentials()
