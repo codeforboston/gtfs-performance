@@ -4,10 +4,9 @@
             [ring.middleware.keyword-params :refer [wrap-keyword-params]]
             [ring.middleware.params :refer [wrap-params]]
 
-            [mbta-xtras.api-spec :as api :refer [defapi]]
+            [mbta-xtras.api-spec :as api :refer [defapi keyfn]]
             [mbta-xtras.db :as db]
             [mbta-xtras.trip-performance :as trip]
-            [mbta-xtras.utils :refer [keyfn]]
 
             [clojure.spec :as s]
             [clojure.string :as str]))
@@ -28,9 +27,9 @@
   [{:keys [db params]}]
   (let [{:keys [from-datetime to-datetime
                 from-stop to-stop]} params]
-    (trip/travel-times db from-stop to-stop
-                       (Long/parseLong from-datetime)
-                       (Long/parseLong to-datetime))))
+    {:travel-times (trip/travel-times db from-stop to-stop
+                                      (Long/parseLong from-datetime)
+                                      (Long/parseLong to-datetime))}))
 
 (defapi dwells ::api/dwells-request
   [{:keys [db params]}]
@@ -65,16 +64,16 @@
      :key-fn keyfn)))
 
 (defroutes handler
-  (context "/xapi" []
-           (GET "/find_stops" []  find-stops)
-           (GET "/trips_for_stop" [] trips-for-stop)
-           (GET "/trip_performance" []  trip-performance)
+  (GET "/find_stops" []  find-stops)
+  (GET "/trips_for_stop" [] trips-for-stop)
+  (GET "/trip_performance" []  trip-performance)
+  (GET "/debug" req (prn-str req))
 
-           ;; MBTA Performance API:
-           (GET "/dwells" [] dwells)
-           (GET "/headways" [] headways)
-           (GET "/traveltimes" [] travel-times)
-           (GET "/trip_updates" [] trip-updates)))
+  ;; MBTA Performance API:
+  (GET "/dwells" [] dwells)
+  (GET "/headways" [] headways)
+  (GET "/traveltimes" [] travel-times)
+  (GET "/trip_updates" [] trip-updates))
 
 (def app
   (-> #'handler

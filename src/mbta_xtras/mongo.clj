@@ -20,6 +20,10 @@
   (mc/ensure-index db "stop-times" (array-map :stop-id 1))
   (mc/ensure-index db "stop-times" (array-map :stop-sequence 1))
 
+  (mc/ensure-index db "trip-stops" (array-map :stamp -1))
+  (mc/ensure-index db "trip-stops" (array-map :trip-id 1))
+  (mc/ensure-index db "trip-stops" (array-map :trip-start 1))
+
   (mc/ensure-index db "arrival-times"
                    (array-map :trip-id 1 :stop-id 1 :trip-start 1)
                    {:unique true}))

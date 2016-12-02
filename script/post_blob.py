@@ -18,6 +18,14 @@ def parse_uri(mongo_uri):
     return (m.group(1), m.group(2))
 
 
+def get_mongo():
+    mongo_uri = os.environ.get("MONGO_URI")
+    if mongo_uri:
+        return parse_uri(mongo_uri)
+    else:
+        return ("localhost", "mbta")
+
+
 def mongo_dump(since_stamp=None, before_stamp=None):
     """
     Call the 'mongodump' utility to generate a zipped archive file.
@@ -32,27 +40,21 @@ def mongo_dump(since_stamp=None, before_stamp=None):
         # Calculate the stamp:
         since_stamp = int(since_dt.timestamp())
 
-    mongo_uri = os.environ.get("MONGO_URI")
-    if mongo_uri:
-        hostname, db = parse_uri(mongo_uri)
-    else:
-        hostname = "localhost"
-        db = "mbta"
     collection = os.environ.get("MONGO_COLLECTION", "trip-stops")
+    (hostname, db) = get_mongo()
     subquery = {"$gte": since_stamp}
     if before_stamp:
         subquery["$lt"] = before_stamp
     query = {"arrival-time": subquery}
-    outfile = "{collection}_{dt}.gz".format(collection=collection,
-                                            dt=since_dt.strftime("%Y_%m"))
-    subprocess.check_output(["mongodump",
-                             "--host", hostname,
-                             "--db", db,
-                             "--collection", "trip-stops",
-                             "--query", json.dumps(query),
-                             "--gzip",
-                             "--archive=" + outfile],
-                            timeout=6000)
+    outfile = "{collection}_{dt}.gz".format(
+        collection=collection, dt=since_dt.strftime("%Y_%m"))
+    subprocess.check_output(
+        [
+            "mongodump", "--host", hostname, "--db", db, "--collection",
+            "trip-stops", "--query", json.dumps(query), "--gzip",
+            "--archive=" + outfile
+        ],
+        timeout=6000)
 
     return outfile
 
@@ -74,19 +76,18 @@ def get_credentials():
     return (name or creds.get("account"), key or creds.get("key"))
 
 
-def upload_blob(outfile):
+def upload_blob(outfile: str):
     account_name, account_key = get_credentials()
     container_name = os.environ.get("AZURE_BUCKET", "mbtafyi")
 
-    service = BlockBlobService(account_name=account_name,
-                               account_key=account_key)
+    service = BlockBlobService(
+        account_name=account_name, account_key=account_key)
     # Ensure that the container exists:
-    service.create_container(container_name,
-                             public_access=PublicAccess.Container)
+    service.create_container(
+        container_name, public_access=PublicAccess.Container)
 
     service.create_blob_from_path(container_name,
-                                  os.path.basename(outfile),
-                                  outfile)
+                                  os.path.basename(outfile), outfile)
     os.unlink(outfile)
 
 
@@ -102,7 +103,6 @@ def do_main(args):
     # except subprocess.CalledProcessError as cpe:
 
     upload_blob(outfile)
-
 
 
 if __name__ == "__main__":

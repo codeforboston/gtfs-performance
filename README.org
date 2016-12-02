@@ -3,11 +3,11 @@
   Fills in some gaps in the current MBTA API.
 
 * Usage
-  
 ** Requirements
    - Java 8 (for the ~java.time~ package)
-     
    - [[http://leiningen.org][Leiningen 2]] - a package management and build tool for Clojure
+   - [[https://www.mongodb.com][MongoDB]] version 3.2 or higher (for certain aggregation operators and zip
+     archives)
 
 ** Running
    For interactive development, I recommend using [[http://cider.readthedocs.io/en/latest/][Cider]] or [[https://cursive-ide.com][Cursive]] and jacking
@@ -28,6 +28,7 @@
    - MBTA_API_KEY :: An MBTA-specific setting, used when communicating with the
         [[http://realtime.mbta.com/Portal/Home/Documents][Realtime API]].
    - TRIP_UPDATES_URL :: Specify a URL to poll for Trip Updates
+   - GTFS_ZONE :: A valid time zone ID (default: America/New_York)
 
    You can also set these as Java system properties on start up. The system
    properties are the same as the environment variales, except downcased and
@@ -39,15 +40,22 @@
      This will create two new .jar files in your ~target~ directory. Run the
      standalone jar with ~java -jar target/mbta-xtras-<version>-standalone.jar~.
      
-
 * Data Dumps
  
   Since others might be interested in using the raw "trip-stops" data without
-  having to run a server, mongodb dumps of the collection will be posted on a
-  regular basis and will be available at the URL with the format:
+  having to run a server, gzipped mongodb dumps of the collection will be
+  automatically posted daily and will be available at URLs with the format:
 
   http://mbta-static.apptic.xyz/mbtafyi/trip-stops_*YYYY_mm*.gz
 
   To view a listing, in XML format, of the available files, see:
 
   http://mbta-static.apptic.xyz/mbtafyi?restype=container&comp=list
+
+  Each file will contain _only_ the trip stops recorded during the month
+  indicated by the file name. Import them using the ~mongorestore~
+  utility. For example:
+
+  #+BEGIN_SRC bash
+  mongorestore --db=mbta --collection=trip-stops --gzip --archive=trip-stops_2016_10.gz
+  #+END_SRC

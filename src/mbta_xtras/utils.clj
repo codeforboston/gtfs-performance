@@ -1,7 +1,8 @@
 (ns mbta-xtras.utils
-  (:require [mbta-xtras.api-spec :as api]
+  (:require #_ [mbta-xtras.api-spec :as api]
             [clojure.spec :as s]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [environ.core :refer [env]])
   (:import [java.time LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
            [java.time.format DateTimeFormatter]
            [java.time.temporal ChronoUnit]))
@@ -11,11 +12,15 @@
         :args (s/cat :stamp number?)
         :ret (partial instance? LocalDateTime))
 
-(s/fdef datetime-for-str
-        :args (s/alt :timezone (s/cat :date ::api/date-str
-                                      :tz ::api/timezone)
-                     :default (s/cat :date ::api/date-str))
-        :ret (partial instance? ZonedDateTime))
+(s/fdef date-for-stamp
+        :args (s/cat :stamp number?)
+        :ref (partial instance? LocalDate))
+
+;; (s/fdef datetime-for-str
+;;         :args (s/alt :timezone (s/cat :date ::api/date-str
+;;                                       :tz ::api/timezone)
+;;                      :default (s/cat :date ::api/date-str))
+;;         :ret (partial instance? ZonedDateTime))
 
 #_
 (s/fdef ->stamp
@@ -23,8 +28,19 @@
 
 ;; Function definitions:
 ;; java.time helpers
-(defn datetime-for-stamp [stamp]
-  (LocalDateTime/from (Instant/ofEpochSecond stamp)))
+(defn datetime-for-stamp
+  ([stamp tz]
+   (-> (Instant/ofEpochSecond stamp)
+       (.atZone (ZoneId/of (or tz (env :gtfs-zone "America/New_York"))))
+       (LocalDateTime/from)))
+  ([stamp]
+   (datetime-for-stamp stamp nil)))
+
+(defn date-for-stamp
+  [stamp & [tz]]
+  (-> stamp
+      (datetime-for-stamp tz)
+      (.toLocalDate)))
 
 
 (def date-format (DateTimeFormatter/ofPattern "yyyyMMdd"))
@@ -66,11 +82,28 @@
         (.withMinute (Long/parseLong m))
         (.withSecond (Long/parseLong s)))))
 
+(def clock-time-format
+  (DateTimeFormatter/ofPattern "HH:mm:ss"))
+
+(defn ->clock-time
+  ([start-date stamp]
+   (let [dt (datetime-for-stamp stamp)]
+     ;; The end time may be on another day.
+     ;; There are probably some DST-related issues with this.
+     (if (and start-date (= (.toLocalDate dt) start-date))
+       (.format clock-time-format dt)
+
+       (str (+ 24 (.getHour dt)) ":" (.getMinute dt) ":" (.getSecond dt)))))
+  ([stamp]
+   (->clock-time nil stamp)))
+
 (defn ->stamp [dt]
   (.getEpochSecond (.toInstant dt)))
 
+;; (defn wrap-keyword-params [handler]
+;;   (fn [req]
+;;     (handler (update-in req [:params] (fn 
+;;                                        )))))
 
-;; Other helpers
-(defn keyfn [x]
-  (str/replace (if (keyword? x) (name x) (str x))
-               #"-" "_"))
+(defn index-by [k coll]
+  (into {} (map (juxt k identity)) coll))

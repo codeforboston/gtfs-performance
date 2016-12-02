@@ -1,12 +1,14 @@
 (ns mbta-xtras.api-spec
+  "Specs for "
   (:require [clojure.spec :as s]
             [clojure.string :as str]
-            [clojure.data.json :as json])
+            [clojure.data.json :as json]
+
+            [mbta-xtras.spec :as xs])
   (:import [java.time ZoneId]))
 
 (s/def ::positive-int-str #(re-matches #"\d+"))
 (s/def ::float-str #(re-matches #"-?\d+(\.\d+)" %))
-(s/def ::date-str (s/and string? #(re-matches #"\d{4}\d{2}\d{2}" %)))
 (s/def ::timezone (s/and string? #(contains? (ZoneId/getAvailableZoneIds) %)))
 (s/def ::q string?)
 (s/def ::lat (s/and ::float-str #(<= -90 (Float/parseFloat %) 90)))
@@ -15,15 +17,9 @@
 (s/def ::route-id string?)
 (s/def ::route string?)
 (s/def ::stop-id string?)
-(s/def ::stop-sequence pos-int?)
 (s/def ::trip-id string?)
-(s/def ::arrival-time pos-int?)
-(s/def ::trip-start ::date-str)
+(s/def ::trip-start ::xs/date-str)
 (s/def ::timestamp-str (s/and string? #(re-matches #"\d+")))
-
-(s/def ::stop-update
-  (s/keys :req-un [::stop-id ::stop-sequence ::arrival-time ::trip-id
-                   ::trip-start]))
 
 ;; User requests:
 (s/def ::q string?)
@@ -107,7 +103,10 @@
 (defn error-message [expl]
   (map explain-problem (::s/problems expl)))
 
-;; TODO: Convert hyphenated-keys to underscore_keys.
+(defn keyfn [x]
+  (str/replace (if (keyword? x) (name x) (str x))
+               #"-" "_"))
+
 (defn wrap-json [x]
   (cond
     (:status x) x
@@ -125,7 +124,8 @@
       {:status 400
        :headers {"Content-type" "application/json"}
        :body (json/write-str {:errors (error-message expl)
-                              :request-params params})}
+                              :request-params params}
+                             :key-fn keyfn)}
 
       (wrap-json (f req)))))
 

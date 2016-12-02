@@ -30,7 +30,10 @@
   (alter-var-root #'mongo component/stop))
 
 (defn start-all []
-  (timbre/merge-config!
-   {:appenders {:println (assoc (println-appender {:stream :auto})
-                                :min-level :warn)}})
+  ;; (timbre/merge-config!
+  ;;  {:appenders {:println (assoc (println-appender {:stream :auto})
+  ;;                               :min-level :warn)}})
   (system/start))
+
+(defn stop-all []
+  (system/stop))

@@ -1,9 +1,17 @@
 (ns mbta-xtras.realtime
   "Code for interacting with the realtime API."
-  (:require [clojure.string :as str]
+  (:require [clojure.spec :as s]
+            [clojure.string :as str]
             [clojure.java.io :as io]
             [environ.core :refer [env]]
-            [clojure.data.json :as json]))
+            [clojure.data.json :as json]
+
+            [mbta-xtras.spec :as xs]
+            [mbta-xtras.utils :as $]))
+
+(s/fdef get-trip
+        :args (s/cat :trip-id ::xs/trip-id)
+        :ret ::xs/trip-description)
 
 (defprotocol ExternalTripInfo
   (get-trip-with [x trip-id]))
@@ -80,5 +88,35 @@
   (case (env :external-api "mbta")
     "mbta" (get-mbta)))
 
-(defn get-trip [trip-id]
+(defn get-trip-raw [trip-id]
   (get-trip-with (get-external) trip-id))
+
+(defn headsign-from-name [trip-name]
+  (last (str/split trip-name #" to ")))
+
+(defn process-trip
+  "Converts the API response trip into a trip suitable for storing in the
+  database."
+  [trip]
+  (let [start-date (-> (:stop trip)
+                       (first)
+                       :sch-arr-dt
+                       (Integer/parseInt)
+                       ($/date-for-stamp))
+        make-sch #($/->clock-time start-date (Integer/parseInt %))
+        stops (:stop trip)]
+    (-> trip
+        (dissoc :stop)
+        (assoc
+         :trip-headsign (headsign-from-name (:trip-name trip))
+         :stops (map (fn [stop]
+                       (-> stop
+                           (update :stop-sequence #(Integer/parseInt %))
+                           (dissoc :sch-arr-dt :sch-dep-dt)
+                           (assoc :scheduled-arrival (make-sch (:sch-arr-dt stop))
+                                  :scheduled-departure (make-sch (:sch-dep-dt stop)))))
+                     stops)))))
+
+(defn get-trip [trip-id]
+  (some-> (get-trip-raw trip-id) (process-trip)))
+

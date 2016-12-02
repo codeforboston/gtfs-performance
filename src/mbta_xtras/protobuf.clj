@@ -4,25 +4,24 @@
             [clojure.spec :as s]
             [environ.core :refer [env]]
             [mbta-xtras.db :as db]
-            [taoensso.timbre :refer [log info error]])
+            [taoensso.timbre :refer [log info error]]
+            [clojure.string :as str])
 
-  (:import [com.google.transit.realtime GtfsRealtime$FeedMessage]))
+  (:import [com.google.transit.realtime GtfsRealtime$FeedMessage
+            GtfsRealtime$TripUpdate$StopTimeUpdate]))
 
 
 (def trip-updates-url
   (env :trip-updates-url "http://developer.mbta.com/lib/GTRTFS/Alerts/TripUpdates.pb"))
 
-
 (defn ^GtfsRealtime$FeedMessage get-feed [url]
   (GtfsRealtime$FeedMessage/parseFrom (io/input-stream url)))
-
 
 (defn get-trip-updates
   "Retrieve the latest TripUpdates from the specified URL, or from the default.
   Note that since this is designed with the MBTA's GTFS-RT feed in mind, the
   update types (trip, vehicle, alert) are delivered on separate feed."
   [& [url]]
-  (info "Retrieving trip updates")
   (get-feed (or url trip-updates-url)))
 
 (defn timestamp [u]
@@ -35,31 +34,46 @@
 (defn trip-updates [^GtfsRealtime$FeedMessage message]
   (keep (memfn getTripUpdate) (. message getEntityList)))
 
+(defn schedule-relationship [^GtfsRealtime$TripUpdate$StopTimeUpdate update]
+  (if (.hasScheduleRelationship update)
+    (keyword (str/lower-case (str (.getScheduleRelationship update))))
+
+    :schedule))
+
 (defn all-stop-updates
   "Processes an ISeq of trip updates into a lazy seq of maps containing
   information about all the stop updates reported on each trip. Maps have an :id
-  attribute that uniquely identifies the trip's arrivals."
-  [trip-updates]
-  (mapcat (fn [tu]
-            (let [start-date (.. tu getTrip getStartDate)
-                  trip-id (.. tu getTrip getTripId)]
-              (map (fn [stop-update]
-                     {:stop-id (.getStopId stop-update)
-                      :stop-sequence (.getStopSequence stop-update)
-                      :arrival-time (.. stop-update getArrival getTime)
-                      :departure-time (.. stop-update getDeparture getTime)
-                      :trip-id trip-id
-                      :trip-start start-date
-                      ;; Unique ID.  We may get multiple updates for the same
-                      ;; stop on the same trip. We'll assume that later updates
-                      ;; are going to better represent the true arrival time of
-                      ;; the vehicle.
-                      ;; Since this is really a storage consideration, maybe
-                      ;; move this elsewhere? If the storage backend supported
-                      ;; it, we'd be using a compound index.
-                      :id (str trip-id "-" start-date "-" (.getStopId stop-update))})
-                   (.getStopTimeUpdateList tu))))
-          trip-updates))
+  attribute that uniquely identifies the trip's arrivals.
+
+  Returns a transducer if no argument is provided."
+  ([trip-updates]
+   (sequence (all-stop-updates) trip-updates))
+  ([]
+   (mapcat (fn [tu]
+             (let [start-date (.. tu getTrip getStartDate)
+                   trip-id (.. tu getTrip getTripId)]
+               (map (fn [stop-update]
+                      (let [rel (schedule-relationship stop-update)]
+                        (merge
+                         {:stop-id (. stop-update getStopId)
+                          :stop-sequence (. stop-update getStopSequence)
+                          :trip-id trip-id
+                          :trip-start start-date
+                          ;; Unique ID.  We may get multiple updates for the same
+                          ;; stop on the same trip. We'll assume that later updates
+                          ;; are going to better represent the true arrival time of
+                          ;; the vehicle.
+                          ;; Since this is really a storage consideration, maybe
+                          ;; move this elsewhere? If the storage backend supported
+                          ;; it, we'd be using a compound index.
+                          :id (str trip-id "-" start-date "-" (.getStopId stop-update))}
+
+                         (if (= rel :scheduled)
+                           {:arrival-time (.. stop-update getArrival getTime)
+                            :departure-time (.. stop-update getDeparture getTime)}
+
+                           {:schedule-relationship (str rel)}))))
+                    (.getStopTimeUpdateList tu)))))))
 
 (defn trip-updates->!
   "Retrieve trip stop updates at an interval, process them, and put them on a
@@ -81,7 +95,7 @@
             (doseq [update (->> (trip-updates updates)
                                 (filter #(> (.getTimestamp %) last-stamp))
                                 (all-stop-updates))]
-              (>! to update)))
+              (>! to (assoc update :stamp stamp))))
 
           (alt!
             (timeout interval) (recur stamp)
@@ -89,5 +103,3 @@
 
         (recur last-stamp)))
     stop))
-
-

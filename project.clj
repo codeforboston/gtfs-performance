@@ -3,7 +3,7 @@
   :url "https://www.mbta.fyi/xapi/"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.9.0-alpha13"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha14"]
                  [org.clojure/data.json "0.2.6"]
                  [com.novemberain/monger "3.1.0"]
                  [com.stuartsierra/component "0.3.1"]
@@ -21,5 +21,6 @@
                  [com.taoensso/timbre "4.8.0-alpha1"]]
   :java-source-paths ["src/java"]
   :main mbta-xtras.system
-  :repl-options {:init-ns mbta-xtras.repl}
+  :repl-options {:init-ns mbta-xtras.repl,
+                 :init (set! *print-length* 50)}
   :uberjar {:aot :all})

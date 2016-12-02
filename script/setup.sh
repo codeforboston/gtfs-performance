@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 if ! which protoc; then
     sudo apt-get install protobuf-compiler
 fi

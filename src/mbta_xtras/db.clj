@@ -51,6 +51,10 @@
                                                  (gtfs/get-stop-times)))]
     (mc/insert-batch db "stop-times" stop-times-group)))
 
+(defn save-api-trip! [db api-trip]
+  (mc/insert db "trips" (dissoc api-trip :stops))
+  (mc/insert-batch db "stop-times" (:stops api-trip)))
+
 (defn stop-times-for-trip [db trip-id]
   (let [stop-times (mc/find-maps db "stop-times" {:trip-id trip-id}
                                  {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1})]
@@ -58,7 +62,8 @@
       stop-times
 
       (when-let [api-trip (rt/get-trip trip-id)]
-        ))))
+        (save-api-trip! api-trip)
+        (:stops api-trip)))))
 
 (defn drop-trip-stops! [db]
   (mc/drop db "trip-stops"))
@@ -88,7 +93,6 @@
 (defn insert-trips! [db]
   (mc/insert-batch db "trips"
                    (map process-trip (gtfs/get-trips))))
-
 
 (defn drop-all! [db]
   (doseq [coll ["stops" "trips" "shapes"]]
