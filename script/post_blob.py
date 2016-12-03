@@ -2,7 +2,8 @@
 Script that dumps the contents of the Mongo database's trip-stops
 collection, then uploads the dump to Blob Storage.
 """
-from datetime import datetime
+import calendar
+from datetime import datetime, timedelta
 import json
 import os
 import re
@@ -26,6 +27,18 @@ def get_mongo():
         return ("localhost", "mbta")
 
 
+def default_date_range():
+    # NOTE: Should really be using local midnight on the first of the
+    # month--but agency local, not server local.
+    dt = datetime.utcnow() - timedelta(days=1)
+    start_dt = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    (_, month_days) = calendar.monthrange(start_dt.year, start_dt.month)
+    end_dt = start_dt + timedelta(days=month_days)
+
+    return start_dt, end_dt
+
+
 def mongo_dump(since_stamp=None, before_stamp=None):
     """
     Call the 'mongodump' utility to generate a zipped archive file.
@@ -33,12 +46,11 @@ def mongo_dump(since_stamp=None, before_stamp=None):
     if since_stamp:
         since_dt = datetime.fromtimestamp(since_stamp)
     else:
-        # NOTE: Should really be using local midnight on the first of the
-        # month--but agency local, not server local.
-        dt = datetime.utcnow()
-        since_dt = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        # Calculate the stamp:
+        since_dt, before_dt = default_date_range()
         since_stamp = int(since_dt.timestamp())
+
+        if not before_stamp:
+            before_stamp = int(before_dt.timestamp())
 
     collection = os.environ.get("MONGO_COLLECTION", "trip-stops")
     (hostname, db) = get_mongo()
