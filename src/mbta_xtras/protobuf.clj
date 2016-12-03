@@ -38,7 +38,7 @@
   (if (.hasScheduleRelationship update)
     (keyword (str/lower-case (str (.getScheduleRelationship update))))
 
-    :schedule))
+    :scheduled))
 
 (defn all-stop-updates
   "Processes an ISeq of trip updates into a lazy seq of maps containing
