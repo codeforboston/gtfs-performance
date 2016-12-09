@@ -51,13 +51,15 @@
   ([]
    (mapcat (fn [tu]
              (let [start-date (.. tu getTrip getStartDate)
-                   trip-id (.. tu getTrip getTripId)]
+                   trip-id (.. tu getTrip getTripId)
+                   route-id (.. tu getTrip getRouteId)]
                (map (fn [stop-update]
                       (let [rel (schedule-relationship stop-update)]
                         (merge
                          {:stop-id (. stop-update getStopId)
                           :stop-sequence (. stop-update getStopSequence)
                           :trip-id trip-id
+                          :route-id route-id
                           :trip-start start-date
                           ;; Unique ID.  We may get multiple updates for the same
                           ;; stop on the same trip. We'll assume that later updates
