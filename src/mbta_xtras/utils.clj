@@ -2,19 +2,29 @@
   (:require #_ [mbta-xtras.api-spec :as api]
             [clojure.spec :as s]
             [clojure.string :as str]
-            [environ.core :refer [env]])
+            [environ.core :refer [env]]
+            [mbta-xtras.utils :as $])
   (:import [java.time LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
            [java.time.format DateTimeFormatter]
            [java.time.temporal ChronoUnit]))
 
+(s/def ::local-date (partial instance? LocalDate))
+
 ;; Function specs:
 (s/fdef datetime-for-stamp
         :args (s/cat :stamp number?)
-        :ret (partial instance? LocalDateTime))
+        :ret ::local-date)
 
 (s/fdef date-for-stamp
         :args (s/cat :stamp number?)
-        :ref (partial instance? LocalDate))
+        :ret ::local-date)
+
+(s/fdef date-strs
+        :args (s/alt :default (s/cat)
+                     :from-date (s/cat :date ::local-date)
+                     :inc-from-date (s/cat :date ::local-date
+                                           :increment integer?))
+        :ret (s/coll-of string?))
 
 ;; (s/fdef datetime-for-str
 ;;         :args (s/alt :timezone (s/cat :date ::api/date-str
@@ -28,10 +38,13 @@
 
 ;; Function definitions:
 ;; java.time helpers
+(def default-time-zone
+  (env :gtfs-zone "America/New_York"))
+
 (defn datetime-for-stamp
   ([stamp tz]
    (-> (Instant/ofEpochSecond stamp)
-       (.atZone (ZoneId/of (or tz (env :gtfs-zone "America/New_York"))))
+       (.atZone (ZoneId/of (or tz default-time-zone)))
        (LocalDateTime/from)))
   ([stamp]
    (datetime-for-stamp stamp nil)))
@@ -44,6 +57,10 @@
 
 
 (def date-format (DateTimeFormatter/ofPattern "yyyyMMdd"))
+(defn date-for-str
+  [date-str]
+  (LocalDate/parse date-str date-format))
+
 (defn datetime-for-str
   ([date-str tz]
    (-> date-str
@@ -51,10 +68,23 @@
        (LocalDateTime/of LocalTime/MIDNIGHT)
        (ZonedDateTime/of (ZoneId/of tz))))
   ([date-str]
-   (datetime-for-str date-str "America/New_York")))
+   (datetime-for-str date-str default-time-zone)))
 
 (defn date-str [date]
   (.format date-format date))
+
+(defn today-str []
+  (.format date-format (LocalDateTime/now)))
+
+(defn date-strs
+  "Returns a lazy sequence of date strings (yyyyMMdd)."
+  ([start-date increment]
+   (lazy-seq (cons ($/date-str start-date)
+                   (date-strs (. start-date plusDays increment)))))
+  ([start-date]
+   (date-strs start-date -1))
+  ([]
+   (date-strs (LocalDate/now) -1)))
 
 (defn set-hours
   [dt h]
@@ -102,7 +132,7 @@
 
 ;; (defn wrap-keyword-params [handler]
 ;;   (fn [req]
-;;     (handler (update-in req [:params] (fn 
+;;     (handler (update-in req [:params] (fn
 ;;                                        )))))
 
 (defn index-by [k coll]

@@ -16,8 +16,9 @@
              [core :as mg]]
             [clojure.java.io :as io]
 
-            [taoensso.timbre :refer [error]])
-  (:import [java.time LocalDateTime]))
+            [taoensso.timbre :refer [error]]
+            [mbta-xtras.utils :as $])
+  (:import [java.time LocalDate ZoneId]))
 
 
 (s/fdef add-stop-delay
@@ -34,17 +35,23 @@
 (s/fdef trip-performance
         :args (s/cat :db ::xs/db
                      :trip-id ::xs/trip-id
-                     :start-date ::xs/start-date)
+                     :trip-start ::xs/trip-start)
         :ret (s/coll-of ::xs/stop-update))
+
+(s/fdef stop-times
+        :args (s/cat :db ::xs/db
+                     :trip-id ::xs/trip-id
+                     :trip-start ::xs/trip-start)
+        :ret (s/coll-of ::xs/scheduled-stop))
 
 (s/fdef process-trips
         :args (s/cat :db ::xs/db
                      :date-trips (s/coll-of ::xs/date-trip))
         :ret nil?)
 
-(s/fdef all-trips
-        :args (s/cat :db ::xs/db)
-        :ret ::xs/date-trip)
+(s/fdef all-trips-for-day
+        :args (s/cat :db ::xs/db
+                     :trip-start ::xs/trip-start))
 
 
 ;; Stores when the trip estimates were last updated:
@@ -74,41 +81,39 @@
   ([db]
    (trip-ids-for-date db (date-str (LocalDateTime/now)))))
 
-(defn- transduce-stop-times
-  [start-date]
-  (let [ref-date (datetime-for-str start-date)]
-    (map (fn [{at :arrival-time, dt :departure-time,
-               ss :stop-sequence, :as stop-time}]
-           [(Integer/parseInt ss)
-            (-> (dissoc stop-time :_id)
-                (assoc :stop-sequence (Integer/parseInt ss)
-                       :scheduled-arrival (->stamp (offset-time ref-date at))
-                       :scheduled-departure (->stamp (offset-time ref-date dt))
-                       :scheduled? true))]))))
-
-
 (defn stop-times
-  [db trip-id start-date]
-  (into (sorted-map)
-        (transduce-stop-times start-date)
-        (mc/find-maps db "stop-times" {:trip-id trip-id})))
+  [db trip-id trip-start]
+  (let [ref-date (datetime-for-str trip-start)
+        xf (map (fn [{at :arrival-time, dt :departure-time,
+                      ss :stop-sequence, :as stop-time}]
+                  [(Integer/parseInt ss)
+                   (-> (dissoc stop-time :_id)
+                       (assoc :stop-sequence (Integer/parseInt ss)
+                              :scheduled-arrival (->stamp (offset-time ref-date at))
+                              :scheduled-departure (->stamp (offset-time ref-date dt))
+                              :scheduled? true
+                              :trip-id trip-id
+                              :trip-start trip-start))]))]
+    (into (sorted-map) xf (db/stop-times-for-trip db trip-id))))
 
 (defn scheduled-arrivals
-  "Returns a map of scheduled stop arrival times, indexed by the stop sequence."
-  [db trip-id start-date]
+  "Returns a map of scheduled stop arrival times, indexed by the stop sequence.
+  This calculates the arrival times of the trip regardless of whether the trip
+  is actually scheduled to run/did run on the given date."
+  [db trip-id trip-start]
   (into (sorted-map)
-        (let [ref-date (datetime-for-str start-date)]
+        (let [ref-date (datetime-for-str trip-start)]
           (map (fn [{at :arrival-time, ss :stop-sequence}]
                  [(Integer/parseInt ss) (->stamp (offset-time ref-date at))])))
-        (mc/find-maps db "stop-times" {:trip-id trip-id})))
+        (db/stop-times-for-trip db trip-id)))
 
 (defn scheduled-arrival
-  [db start-date trip-id stop-sequence]
+  [db trip-start trip-id stop-sequence]
   (when-let [st (mc/find-one-as-map db "stop-times"
                                     {:trip-id trip-id
                                      :stop-sequence stop-sequence})]
-    (-> start-date
-        (datetime-for-str start-date)
+    (-> trip-start
+        (datetime-for-str trip-start)
         (offset-time (:arrival-time st))
         (->stamp))))
 
@@ -121,15 +126,19 @@
       :scheduled-arrival sched})))
 
 (defn observed-trip-performance
+  "Returns a sequence of trip stops for a trip-id on a given start date,
+  omitting estimates."
   [db trip-id start-date]
   (let [scheduled (scheduled-arrivals db trip-id start-date)]
     (->> (mc/find-maps db "trip-stops" {:trip-id trip-id,
-                                        :trip-start start-date})
+                                        :trip-start start-date
+                                        :estimated? {:$ne true}})
          (keep (partial add-stop-delay scheduled))
          (sort-by :stop-sequence))))
 
 (defn all-stops
-  "Merge the stops into a single sequence, ordered by :stop-sequence."
+  "Merge the stops into a single sequence, ordered by :stop-sequence.
+  `scheduled` must be a sorted map."
   [scheduled actual]
   (map (fn [i] (or (actual i) (scheduled i)))
        (keys scheduled)))
@@ -139,19 +148,20 @@
   sequence. Finds any sub-sequences that have no observed arrival time and
   attempts to  estimate their arrival times. Returns a complete collection of
   stops with estimates added."
-  ([all-stops & [last-obs]])
+  [all-stops & [last-obs]]
   (when-let [l (seq all-stops)]
     (let [[sched actual] (split-with :scheduled? l)]
       (if (seq sched)
         (concat (if-let [next-obs (first actual)]
-                  (if-let [last-arrival (:arrival-time last-obs)]
+                  (if last-obs
                     ;; We have observed arrival times for the stops flanking this
                     ;; subsequence of scheduled stops, so we'll 'spread' the
                     ;; (positive or negative) delay over the stops between the
                     ;; observed stops. Use the scheduled to determine the
                     ;; proportion of the total trip that each stop represents and
                     ;; scale the additional delay appropriately.
-                    (let [obs-duration (- (:arrival-time next-obs) last-arrival)
+                    (let [last-arrival (:arrival-time last-obs)
+                          obs-duration (- (:arrival-time next-obs) last-arrival)
                           sch-duration (- (:scheduled-arrival next-obs)
                                           (:scheduled-arrival last-obs))]
                       (map (fn [scheduled-stop]
@@ -160,31 +170,49 @@
                                                sch-duration)
                                             obs-duration)]
                                (assoc scheduled-stop
+                                      :id (str (:trip-id scheduled-stop) "-"
+                                               (:trip-start ))
                                       :arrival-time (+ last-arrival delay)
+                                      :departure-time (+ (:departure-time
+                                                          last-obs) delay)
                                       :delay delay
                                       :estimation-method "interpolated"
                                       :estimated? true)))
                            sched))
 
-                    (let [delay (- (:arrival-time next-obs)
-                                   (:scheduled-arrival next-obs))
-                          ]
-                      (map (fn [scheduled-stop]
-                             (assoc scheduled-stop
-                                    :arrival-time (+ shift
-                                                     (:scheduled-arrival scheduled-stop))
-                                    :delay shift
-                                    :estimation-method "shifted"
-                                    :estimated? true))
-                           sched)))
+                    ;; There's a next observation but no last (previous) observation.
+
+                    ;; For estimation purposes, assume that the trip began on
+                    ;; time (delay=0) and became later/earlier at each stop in
+                    ;; proportion to the scheduled time between stops.
+                    (let [obs-delay (- (:arrival-time next-obs) (:scheduled-arrival next-obs))
+                          sch-start (:scheduled-arrival (first sched))
+                          sch-duration (- (:scheduled-arrival next-obs) sch-start)]
+                      (map (fn [{:keys [scheduled-arrival scheduled-departure]
+                                 :as scheduled-stop}]
+                             (let [stop-delay (* (/ (- scheduled-arrival sch-start)
+                                                    sch-duration)
+                                                 obs-delay)]
+
+                               (assoc scheduled-stop
+                                      :arrival-time (+ scheduled-arrival stop-delay)
+                                      :departure-time (+ scheduled-departure
+                                                         stop-delay)
+                                      :delay (int stop-delay)
+                                      :shift-delay obs-delay
+                                      :estimated? true)))
+                           sched))
+                    )
 
                   ;; We have only the schedule! Don't bother estimating.
                   sched)
 
-                (add-estimates actual))
+                (add-estimates actual last-obs))
 
-        (let [[actual rest] (split-with (complement :scheduled?) actual)]
-          (concat actual (add-estimates rest (last actual))))))))
+        (let [[actual rest] (split-with (complement :scheduled?) actual)
+              non-skipped (filter #(not= (:schedule-relationship %) "scheduled") actual)]
+          ;; TODO Try lazy-cat?
+          (concat actual (add-estimates rest (or (last non-skipped) last-obs))))))))
 
 
 (defn trip-performance
@@ -193,14 +221,13 @@
   was. When there is no information about a trip's arrival time at a stop,
   estimate it using either interpolation or shifting, depending on the
   information available."
-  [db trip-id start-date]
-  (let [scheduled (stop-times db trip-id start-date)
+  [db trip-id trip-start]
+  (let [scheduled (stop-times db trip-id trip-start)
         trip-stops (->> (mc/find-maps db "trip-stops" {:trip-id trip-id
-                                                       :trip-start start-date})
+                                                       :trip-start trip-start})
                         (keep (partial add-stop-delay (comp :scheduled-arrival scheduled)))
                         (index-by :stop-sequence))]
     (add-estimates (all-stops scheduled trip-stops))))
-
 
 (defn travel-times
   "Uses data stored in the database to calculate the performance of trips
@@ -233,7 +260,7 @@
                  :arr-dt (str (:arrival-time to-stop))
                  :travel-time-sec (- (:arrival-time to-stop) (:departure-time
                                                               from-stop))
-                 :estimated? (or (:estimated? from-stop) (:estimated? to-stop))
+                 :estimated (or (:estimated? from-stop) (:estimated? to-stop))
                  :benchmark-travel-time-sec bench
                  :route-id (:route-id trip)
                  :direction (:direction-id trip)})))
@@ -243,41 +270,38 @@
   "Find the unique trips (trip_id + trip_start_date) that have run since the
   given stamp."
   [db stamp]
-  (mc/aggregate
-   db "trip-stops"
-   [{:$match {:$or [{:stamp {:$gte stamp}} {:arrival-time {:$gte stamp}}]}}
-    {:$group {:_id {:trip-id "$trip-id", :trip-start "$trip-start"}}}]))
+  (map (comp (juxt :trip-id :trip-start) :_id)
+       (mc/aggregate
+        db "trip-stops"
+        [{:$match {:$or [{:stamp {:$gte stamp}} {:arrival-time {:$gte stamp}}]}}
+         {:$group {:_id {:trip-id "$trip-id", :trip-start "$trip-start"}}}])))
+
+(defn all-trips-for-day
+  [db date-str]
+  (map (fn [trip-id] [date-str trip-id])
+       (mc/distinct db "trip-stops" :trip-id {:trip-start date-str})))
 
 (defn all-trips
-  "Returns a lazy sequence of [trip-start trip-id]."
-  [db & [match]]
-  (map
-   (fn [{m :_id}] [(:trip-start m) (:trip-id m)])
-   (mc/aggregate
-    db "trip-stops"
-    (cond->> [{:$group {:_id {:trip-id "$trip-id",
-                              :trip-start "$trip-start"}}}]
-      match (cons {:$match match}))
-    :allow-disk-use true
-    :cursor {:batch-size 100})))
+  "Returns an infinite sequence of [date-str trip-id] pairs, where date-str is
+  in descending order."
+  [db]
+  (mapcat (partial all-trips-for-day db)
+          ($/date-strs)))
 
-(defn process-trips [db date-trips]
+(defn process-trips
+  [db date-trips]
   (doseq [[trip-start trip-id] date-trips]
     (doseq [stop (trip-performance db trip-id trip-start)]
-      (mc/upsert db "trip-stops" {:id (:id stop)} {:$set stop}))))
-
-(defn process-all-trips! [db]
-  (process-trips db (all-trips db)))
+      (let [id (str trip-id "-" trip-start "-" (:stop-id stop))]
+        (mc/upsert db "trip-stops" {:id id} {:$set (assoc stop :id id)})))))
 
 (defn post-loop
-  ""
+  "Start the trip-stop post-processing loop. Fill in gaps in the "
   ([db last-run]
    (let [stop (chan)]
      (go-loop [last-run last-run]
-       (let [recent-trips (map :_id (trips-since db last-run))]
-         (doseq [{:keys [trip-id trip-start]} recent-trips
-                 :let [stops (trip-performance db trip-id trip-start)]]
-           ))
+       (process-trips db (trips-since db last-run))
+
        (let [stamp (/ (System/currentTimeMillis) 1000)]
          (alt!
            (timeout 3600000) (recur stamp)
@@ -308,6 +332,18 @@
                    {:$set trip-stop})
         (recur)))
     stop))
+
+(defrecord PostProcessing []
+  component/Lifecycle
+  (start [this]
+    (assoc this
+           :stop-chan (post-loop (-> this :mongo :db)
+                                 (.. (LocalDate/now)
+                                     (atStartOfDay (ZoneId/of $/default-time-zone))
+                                     (toEpochSecond)))))
+
+  (stop [this]
+    (some-> (:stop-chan this) (async/close!))))
 
 
 (defrecord TripPerformanceRecorder [coll]

@@ -15,11 +15,11 @@
 (s/def ::lon (s/and ::float-str #(<= -180 (Float/parseFloat %) 190)))
 (s/def ::direction ::positive-int-str)
 (s/def ::route-id string?)
-(s/def ::route string?)
+(s/def ::route ::route-id)
 (s/def ::stop-id string?)
 (s/def ::trip-id string?)
 (s/def ::trip-start ::xs/date-str)
-(s/def ::timestamp-str (s/and string? #(re-matches #"\d+")))
+(s/def ::timestamp-str (s/and string? #(re-matches #"^\d+$" %)))
 
 ;; User requests:
 (s/def ::q string?)
@@ -35,7 +35,8 @@
 (s/def ::from-stop ::stop-id)
 (s/def ::to-stop ::stop-id)
 (s/def ::travel-times-request
-  (s/keys :req-un [::from-datetime ::to-datetime ::from-stop ::to-stop]))
+  (s/keys :req-un [::from-datetime ::to-datetime ::from-stop ::to-stop]
+          :opt-un [::route]))
 
 (s/def ::dep-dt ::positive-int-str)
 (s/def ::arr-dt ::positive-int-str)

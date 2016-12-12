@@ -1,10 +1,16 @@
 (ns mbta-xtras.gtfs-updater
   (:require [clojure.core.async :refer [<! alt! chan go-loop timeout]]
             [com.stuartsierra.component :as component]
-            [taoensso.timbre :refer [info error warn
-                                     ]]
+            [taoensso.timbre :refer [info error warn]]
 
-            [mbta-xtras.gtfs :as gtfs]))
+            [mbta-xtras.gtfs :as gtfs]
+            [clojure.java.io :as io])
+  (:import [java.util.zip ZipInputStream ZipEntry]))
+
+
+(def *zis (ZipInputStream. (io/input-stream gtfs/manifest-url)))
+
+(def *entry (.getNextEntry *zis))
 
 (defonce feed-info (atom nil))
 

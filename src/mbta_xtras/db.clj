@@ -5,12 +5,15 @@
 
             [mbta-xtras.gtfs :as gtfs]
             [mbta-xtras.realtime :as rt]
+            [clojure.core.async :as async :refer [<! go-loop]]
             [clojure.string :as str]
-            [mbta-xtras.db :as db]))
+            [taoensso.timbre :refer [info]]
+            [mbta-xtras.db :as db]
+            [mbta-xtras.utils :as $]))
 
-
-(defn get-db [conn]
-  (mg/get-db conn "mbta"))
+(defonce agencies (atom nil))
+(defonce transfers (atom nil))
+(defonce calendar (atom nil))
 
 (defn make-point [m lat-k lon-k]
   {:type "Point",
@@ -33,10 +36,6 @@
       (update :stop-lat #(Double/parseDouble %))
       (update :stop-lon #(Double/parseDouble %))))
 
-(defn insert-stops! [db]
-  (mc/insert-batch db "stops"
-                   (map process-stop (gtfs/get-stops))))
-
 (defn find-closest-stop [db lat lon]
   (mc/find-one-as-map db "stops" {:coords (near-query lat lon)}))
 
@@ -46,18 +45,14 @@
 (defn process-stop-time [x]
   (update x :stop-sequence #(Integer/parseInt %)))
 
-(defn insert-stop-times! [db]
-  (doseq [stop-times-group (partition 20000 (map process-stop-time
-                                                 (gtfs/get-stop-times)))]
-    (mc/insert-batch db "stop-times" stop-times-group)))
-
 (defn save-api-trip! [db api-trip]
   (mc/insert db "trips" (dissoc api-trip :stops))
   (mc/insert-batch db "stop-times" (:stops api-trip)))
 
 (defn stop-times-for-trip [db trip-id]
   (let [stop-times (mc/find-maps db "stop-times" {:trip-id trip-id}
-                                 {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1})]
+                                 {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1,
+                                  :departure-time 1})]
     (if (seq stop-times)
       stop-times
 
@@ -98,12 +93,68 @@
   (doseq [coll ["stops" "trips" "shapes"]]
     (mc/drop db coll)))
 
+
+
 (defn rebuild! [db]
   (doto db
     (drop-all!)
     (insert-stops!)
     (insert-shapes!)
     (insert-trips!)))
+
+(defn collection-swap [db coll-name docs]
+  (if (mc/exists? db coll-name)
+    (do (mc/insert-batch db (str "new-" coll-name) docs)
+        (mc/rename db coll-name (str coll-name "-" ($/today-str)))
+        (mc/rename db (str "new-" coll-name) coll-name))
+    (mc/insert-batch db coll-name docs)))
+
+(defmulti process-csv! first)
+(defmethod process-csv! nil [_] nil)
+(defmethod process-csv! "stops.txt"
+  [[_ stops] db]
+  (collection-swap db "stops" (map process-stop stops)))
+
+(defmethod process-csv! "routes.txt"
+  [[_ routes] db]
+  (collection-swap db "routes" routes))
+
+(defmethod process-csv! "stop_times.txt"
+  [[_ stop-times] db]
+  (doseq [stop-times-group (partition 20000 (map process-stop-time stop-times))]
+    (mc/insert-batch db "new-stop-times" stop-times-group))
+  (when (mc/exists? db "stop-times")
+    (mc/rename db (str "stop-times-" ($/today-str))))
+  (mc/rename db "new-stop-times" "stop-times"))
+
+(defmethod process-csv! "trips.txt"
+  [[_ trips] db])
+
+(defmethod process-csv! "calendar.txt"
+  [[_ service-dates] _db]
+  (reset! calendar service-dates))
+
+(defmethod process-csv! "agencies.txt"
+  [[_ new-agencies] _db]
+  (reset! agencies new-agencies))
+
+(defmethod process-csv! "transfers.txt"
+  [[_ new-transfers] _db]
+  (reset! transfers new-transfers))
+
+;; Ignore: transfers.txt, agencies.txt, calendar_dates.txt, 
+
+(defn update-loop
+  "Start a feed updates channel. Every time it reports an update, "
+  []
+  (let [updates (gtfs/feed-updates)]
+    (go-loop []
+      ;; The updates channel receives a non-nil message each time the feed is
+      ;; updated.
+      (when (<! updates)
+        (doseq [[file-name _csv :as gtfs-file] (gtfs/csv-to-maps)]
+          (info "Reading updates from " file-name)
+          (process-csv! gtfs-file))))))
 
 (defn make-re [s]
   (re-pattern (str "(?<=\\b|^)"
@@ -130,7 +181,7 @@
   (mc/find-maps db "trips" (build-trip-query params)))
 
 (defn trip-runs-on?
-  "Determines "
+  "Determines if the trip `trip-id` runs on the date `dt`."
   [db trip-id dt]
   (let [{:keys [service-id]} (mc/find-one-as-map db "trips" {:trip-id trip-id})]))
 

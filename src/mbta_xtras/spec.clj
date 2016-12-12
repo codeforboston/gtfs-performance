@@ -19,8 +19,10 @@
 (s/def ::direction-name string?)
 (s/def ::stop-sequence pos-int?)
 (s/def ::arrival-time pos-int?)
+(s/def ::departure-time pos-int?)
 (s/def ::delay int?)
 (s/def ::scheduled-arrival pos-int?)
+(s/def ::scheduled-departure pos-int?)
 (s/def ::date-str
   (s/with-gen
     (s/and string? #(re-matches #"\d{4}\d{2}\d{2}" %))
@@ -39,10 +41,20 @@
   (s/cat ::trip-start ::trip-id))
 
 (s/def ::stop-update
-  (s/keys :req-un [::stop-id ::stop-sequence ::arrival-time ::trip-id
-                   ::trip-start]
-          :opt-un [::delay ::scheduled-arrival]))
+  (s/and (s/keys :req-un [::stop-id ::stop-sequence ::arrival-time ::trip-id
+                          ::trip-start] 
+                 :opt-un [::delay ::departure-time ::scheduled-arrival])
+         #(or (not (:departure-time %))
+              (> (:departure-time %) (:arrival-time %)))))
 
+(s/def ::scheduled-stop
+  (s/keys :req-un [::stop-id ::stop-sequence ::scheduled-arrival
+                   ::scheduled-departure ::trip-id ::trip-start]))
+
+;; TODO Create a generator that generates stops in order
+(s/def ::stop-updates
+  (s/coll-of ::stop-update))
+#_
 (s/def ::stop-updates
   (s/with-gen (s/coll-of ::stop-update)
     (fn []
