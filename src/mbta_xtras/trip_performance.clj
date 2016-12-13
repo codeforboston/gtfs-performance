@@ -46,12 +46,21 @@
 
 (s/fdef process-trips
         :args (s/cat :db ::xs/db
-                     :date-trips (s/coll-of ::xs/date-trip))
+                     :trip-instances (s/coll-of ::xs/trip-instance))
         :ret nil?)
 
 (s/fdef all-trips-for-day
         :args (s/cat :db ::xs/db
                      :trip-start ::xs/trip-start))
+
+(s/fdef trips-since
+        :args (s/cat :db ::xs/db
+                     :stamp ::xs/stamp)
+        :ret (s/coll-of ::xs/trip-instance))
+
+(s/fdef recent-trips
+        :args (s/cat :db ::xs/db
+                     :duration int?))
 
 
 ;; Stores when the trip estimates were last updated:
@@ -147,7 +156,8 @@
   "Takes a joined sequence of stops, scheduled and unscheduled, ordered by stop
   sequence. Finds any sub-sequences that have no observed arrival time and
   attempts to  estimate their arrival times. Returns a complete collection of
-  stops with estimates added."
+  stops with estimates added when possible. Recuse until all-stops is completely
+  consumed."
   [all-stops & [last-obs]]
   (when-let [l (seq all-stops)]
     (let [[sched actual] (split-with :scheduled? l)]
@@ -210,8 +220,12 @@
                 (add-estimates actual last-obs))
 
         (let [[actual rest] (split-with (complement :scheduled?) actual)
-              non-skipped (filter #(not= (:schedule-relationship %) "scheduled") actual)]
+              non-skipped (filter :arrival-time actual)]
           ;; TODO Try lazy-cat?
+          ;; Concatenate the  observed stops (unmodified) and the remainder (with
+          ;; estimates added). Since some of the observed stops could have been
+          ;; skipped or canceled, use the last non-skipped stop as the last
+          ;; observation.
           (concat actual (add-estimates rest (or (last non-skipped) last-obs))))))))
 
 
@@ -276,6 +290,11 @@
         [{:$match {:$or [{:stamp {:$gte stamp}} {:arrival-time {:$gte stamp}}]}}
          {:$group {:_id {:trip-id "$trip-id", :trip-start "$trip-start"}}}])))
 
+(defn recent-trips
+  "Retrieves trip instances that have run in the last `ago` seconds."
+  [db ago]
+  (trips-since db (- (/ (System/currentTimeMillis) 1000) ago)))
+
 (defn all-trips-for-day
   [db date-str]
   (map (fn [trip-id] [date-str trip-id])
@@ -289,14 +308,16 @@
           ($/date-strs)))
 
 (defn process-trips
-  [db date-trips]
-  (doseq [[trip-start trip-id] date-trips]
+  ""
+  [db trip-instances]
+  (doseq [[trip-id trip-start] trip-instances]
     (doseq [stop (trip-performance db trip-id trip-start)]
       (let [id (str trip-id "-" trip-start "-" (:stop-id stop))]
         (mc/upsert db "trip-stops" {:id id} {:$set (assoc stop :id id)})))))
 
 (defn post-loop
-  "Start the trip-stop post-processing loop. Fill in gaps in the "
+  "Start the trip-stop post-processing loop. Fill in gaps in the trip-stops and
+  save so that things like travel-times will be able to work efficiently."
   ([db last-run]
    (let [stop (chan)]
      (go-loop [last-run last-run]
