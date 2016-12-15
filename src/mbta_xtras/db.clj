@@ -2,18 +2,26 @@
   (:require [monger.collection :as mc]
             [monger.core :as mg]
             [monger.operators :refer [$near]]
+            [com.stuartsierra.component :as component]
 
+            [mbta-xtras.db :as db]
             [mbta-xtras.gtfs :as gtfs]
             [mbta-xtras.realtime :as rt]
+            [mbta-xtras.utils :as $]
+
             [clojure.core.async :as async :refer [<! go-loop]]
             [clojure.string :as str]
-            [taoensso.timbre :refer [info]]
-            [mbta-xtras.db :as db]
-            [mbta-xtras.utils :as $]))
+            [taoensso.timbre :refer [error info]]
+            [clojure.set :as set]))
+
 
 (defonce agencies (atom nil))
 (defonce transfers (atom nil))
 (defonce calendar (atom nil))
+;; Map of dates -> canceled service-ids
+(defonce no-service (atom nil))
+;; Map of dates -> extra service-ids
+(defonce xtra-service (atom nil))
 
 (defn make-point [m lat-k lon-k]
   {:type "Point",
@@ -27,9 +35,6 @@
            "$maxDistance" (or max-dist 50)}}))
 
 ; Stops:
-(defn drop-stops! [db]
-  (mc/drop db "stops"))
-
 (defn process-stop [stop]
   (-> stop
       (assoc :coords (make-point stop :stop-lat :stop-lon))
@@ -57,7 +62,7 @@
       stop-times
 
       (when-let [api-trip (rt/get-trip trip-id)]
-        (save-api-trip! api-trip)
+        (save-api-trip! db api-trip)
         (:stops api-trip)))))
 
 (defn drop-trip-stops! [db]
@@ -73,34 +78,9 @@
                                     points)}})
        (partition-by :shape-id shape-points)))
 
-(defn insert-shapes! [db]
-  (mc/insert-batch db "shapes" (make-shapes (gtfs/get-shapes))))
-
-(defn drop-shapes! [db]
-  (mc/drop db "shapes"))
-
-;; Trips
-(defn drop-trips! [db]
-  (mc/drop db "trips"))
 
 (def process-trip identity)
 
-(defn insert-trips! [db]
-  (mc/insert-batch db "trips"
-                   (map process-trip (gtfs/get-trips))))
-
-(defn drop-all! [db]
-  (doseq [coll ["stops" "trips" "shapes"]]
-    (mc/drop db coll)))
-
-
-
-(defn rebuild! [db]
-  (doto db
-    (drop-all!)
-    (insert-stops!)
-    (insert-shapes!)
-    (insert-trips!)))
 
 (defn collection-swap [db coll-name docs]
   (if (mc/exists? db coll-name)
@@ -109,8 +89,9 @@
         (mc/rename db (str "new-" coll-name) coll-name))
     (mc/insert-batch db coll-name docs)))
 
-(defmulti process-csv! first)
-(defmethod process-csv! nil [_] nil)
+
+(defmulti process-csv! (fn [[x] _] x))
+(defmethod process-csv! :default [_ _] nil)
 (defmethod process-csv! "stops.txt"
   [[_ stops] db]
   (collection-swap db "stops" (map process-stop stops)))
@@ -121,6 +102,7 @@
 
 (defmethod process-csv! "stop_times.txt"
   [[_ stop-times] db]
+  ;; Add the stops times in batches
   (doseq [stop-times-group (partition 20000 (map process-stop-time stop-times))]
     (mc/insert-batch db "new-stop-times" stop-times-group))
   (when (mc/exists? db "stop-times")
@@ -128,33 +110,90 @@
   (mc/rename db "new-stop-times" "stop-times"))
 
 (defmethod process-csv! "trips.txt"
-  [[_ trips] db])
+  [[_ trips] db]
+  (collection-swap db "trips" trips))
+
+(defn process-service [service]
+  (reduce (fn [service k]
+            (assoc service k (= (k service) "1")))
+          service
+          $/day-keywords))
 
 (defmethod process-csv! "calendar.txt"
   [[_ service-dates] _db]
-  (reset! calendar service-dates))
+  (reset! calendar (into {} (map (fn [service]
+                                   [(:service-id service)
+                                    (process-service service)])
+                                 service-dates))))
 
-(defmethod process-csv! "agencies.txt"
+(defn process-service-exceptions [service-exceptions]
+  (reduce (fn [m exc]
+            (update-in m [(:exception-type exc)
+                          (:date exc)]
+                       conj (:service-id exc)))
+          {}
+          service-exceptions))
+
+(defmethod process-csv! "calendar_dates.txt"
+  [[_ service-exceptions] _db]
+  (let [excs (process-service-exceptions service-exceptions)]
+    (reset! no-service (get excs "2"))
+    (reset! xtra-service (get excs "1"))))
+
+(defmethod process-csv! "agency.txt"
   [[_ new-agencies] _db]
-  (reset! agencies new-agencies))
+  (reset! agencies ($/index-by :agency-id new-agencies)))
 
 (defmethod process-csv! "transfers.txt"
   [[_ new-transfers] _db]
   (reset! transfers new-transfers))
 
-;; Ignore: transfers.txt, agencies.txt, calendar_dates.txt, 
+;; Ignore calendar_dates.txt, fare_attributes.txt, fare_rules.txt,
+;; frequencies.txt, shapes.txt
+
+(defn trip-ends [db]
+  (mc/aggregate db "stop-times"
+                [{:$group {:_id "$trip-id",
+                           :start {:$min "$departure-time"}
+                           :end {:$max "$arrival-time"}}}]))
+
+(defn post-update [db]
+  ;; Record the trip start and stop times.
+  (doseq [{trip-id :_id, s :start, e :end} (trip-ends db)]
+    (mc/update db "trips" {:trip-id trip-id} {:$set {:start-time s
+                                                     :end-time e}})))
+
+(defn do-update! [db]
+  (doseq [[file-name _csv :as gtfs-file] (gtfs/iterate-gtfs-files)]
+    (info "Reading updates from" file-name)
+    (try
+      (process-csv! gtfs-file db)
+      (catch Exception exc
+        (error "Error while processing" file-name exc))))
+  (post-update db))
+
+(defn slurp-run-info []
+  (try
+    (read-string (slurp "resources/run_info.clj"))
+    (catch Exception _
+      nil)))
 
 (defn update-loop
-  "Start a feed updates channel. Every time it reports an update, "
-  []
+  "Start a feed updates channel. Every time it reports an update, iterate over
+  the contents of the GTFS zip and process the files."
+  [db]
   (let [updates (gtfs/feed-updates)]
     (go-loop []
       ;; The updates channel receives a non-nil message each time the feed is
       ;; updated.
-      (when (<! updates)
-        (doseq [[file-name _csv :as gtfs-file] (gtfs/csv-to-maps)]
-          (info "Reading updates from " file-name)
-          (process-csv! gtfs-file))))))
+      (when-let [info (<! updates)]
+        (when (not= (:feed-version (slurp-run-info))
+                    (:feed-version info))
+          (do-update! db)
+          (spit "resources/run_info.clj" (pr-str info)))
+        (recur)))
+    updates))
+
 
 (defn make-re [s]
   (re-pattern (str "(?<=\\b|^)"
@@ -181,9 +220,11 @@
   (mc/find-maps db "trips" (build-trip-query params)))
 
 (defn trip-runs-on?
+  ;; TODO
   "Determines if the trip `trip-id` runs on the date `dt`."
   [db trip-id dt]
-  (let [{:keys [service-id]} (mc/find-one-as-map db "trips" {:trip-id trip-id})]))
+  (let [{:keys [service-id]}
+        (mc/find-one-as-map db "trips" {:trip-id trip-id})]))
 
 
 (defn find-trips-for-stop [db stop-id]
@@ -198,5 +239,46 @@
 (defn travel-times [db from-stop]
   (mc/find-maps db "stop-times" {:stop-id from-stop} {:_id 0,
                                                       :trip-id 1
-                                                      :stop-sequence 1})
-  )
+                                                      :stop-sequence 1}))
+
+(defn services-at
+  "Calculates a set of service-ids that run on a given LocalDateTime."
+  [dt]
+  (-> (into #{} (comp (map val)
+                      (filter ($/day-keyword dt))
+                      (let [d (.toLocalDate dt)]
+                        (filter (fn [{:keys [end-date start-date]}]
+                                  (and (>= (compare d ($/local-date-for-str
+                                                       start-date)) 0)
+                                       (<= (compare d ($/local-date-for-str
+                                                       end-date)) -1)))))
+                      (map :service-id))
+            @calendar)
+      (set/difference (set (get @no-service ($/date-str dt))))
+      (set/union (set (get @xtra-service ($/date-str dt))))))
+
+;; The start and stop times are not stored in trips!
+(defn scheduled-trips-at
+  "Returns a sequence of trip ids that are scheduled to run at the given time."
+  [db dt]
+  (let [to-dt (partial $/offset-time dt)]
+    (filter
+     (fn [{:keys [start-time end-time]}]
+       (and start-time end-time
+            (>= (compare dt (to-dt start-time)) 0)
+            (< (compare dt (to-dt end-time)) 0)))
+     (mc/find-maps db "trips" {:service-id {:$in (services-at dt)}}
+                   {:_id 0, :block-id 0, :service-id 0, :shape-id 0,
+                    :trip-short-name 0, :wheelchair-accessible 0}))))
+
+
+(defrecord GtfsUpdater []
+  component/Lifecycle
+  (start [this]
+    (assoc this :stop-chan (update-loop (-> this :mongo :db))))
+
+  (stop [this]
+    (some-> (:stop-chan this) async/close!)
+    (dissoc this :stop-chan)))
+
+(defn make-updater [] (->GtfsUpdater))
