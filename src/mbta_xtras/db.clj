@@ -50,9 +50,22 @@
 (defn process-stop-time [x]
   (update x :stop-sequence #(Integer/parseInt %)))
 
-(defn save-api-trip! [db api-trip]
-  (mc/insert db "trips" (dissoc api-trip :stops))
-  (mc/insert-batch db "stop-times" (:stops api-trip)))
+(defn minc [a b]
+  (if (neg? (compare a b)) a b))
+
+(defn maxc [a b]
+  (if (pos? (compare a b)) a b))
+
+(defn save-api-trip! [db {:keys [stops] :as api-trip}]
+  (mc/insert-batch db "stop-times" stops)
+  (let [[start end] (reduce (fn [[min-arrival max-departure] [arrival departure]]
+                              [(minc arrival min-arrival) (maxc departure max-departure)])
+                            (map (juxt :scheduled-arrival :scheduled-departure)
+                                 stops))]
+    (mc/insert db "trips" (-> api-trip
+                              (dissoc :stops)
+                              (assoc :start-time start
+                                     :end-time end)))))
 
 (defn stop-times-for-trip [db trip-id]
   (let [stop-times (mc/find-maps db "stop-times" {:trip-id trip-id}
