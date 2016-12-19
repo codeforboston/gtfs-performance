@@ -8,7 +8,8 @@
             [clojure.string :as str])
 
   (:import [com.google.transit.realtime GtfsRealtime$FeedMessage
-            GtfsRealtime$TripUpdate$StopTimeUpdate]))
+            GtfsRealtime$TripUpdate$StopTimeUpdate]
+           [com.google.protobuf InvalidProtocolBufferException]))
 
 
 (def trip-updates-url
@@ -90,6 +91,10 @@
                             ;; due to transient network issues, quotas, or (I
                             ;; suspect) non-atomic writing to the protobuf on
                             ;; the part of the MBTA.
+                            (catch InvalidProtocolBufferException ipb-ex
+                              ;; Don't print the whole stacktrace and unfinished
+                              ;; message, since it's really spammy.
+                              (error (.getMessage ipb-ex)))
                             (catch Exception ex
                               (error ex "encountered while fetching trip updates")))]
         (let [stamp (.. updates getHeader getTimestamp)]
