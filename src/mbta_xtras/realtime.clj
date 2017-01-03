@@ -90,8 +90,8 @@
                        (-> stop
                            (update :stop-sequence #(Integer/parseInt %))
                            (dissoc :sch-arr-dt :sch-dep-dt)
-                           (assoc :scheduled-arrival (make-sch (:sch-arr-dt stop))
-                                  :scheduled-departure (make-sch (:sch-dep-dt stop)))))
+                           (assoc :arrival-time (make-sch (:sch-arr-dt stop))
+                                  :departure-time (make-sch (:sch-dep-dt stop)))))
                      stops)))))
 
 (defn get-trip [trip-id]
