@@ -9,7 +9,8 @@
             [mbta-xtras.trip-performance :as trip]
 
             [clojure.spec :as s]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [mbta-xtras.utils :as $]))
 
 
 (defapi find-stops ::api/find-stops-query
@@ -53,7 +54,6 @@
 
 (defapi trips-for-stop ::api/trips-for-stop-request
   [{:keys [db params]}]
-
   (db/find-trips-for-stop db (:stop-id params)))
 
 (defapi trip-updates ::api/trip-updates-request
@@ -63,11 +63,26 @@
      (db/trip-updates db trip-id trip-start)
      :key-fn keyfn)))
 
+(defapi services-at ::api/services-request
+  [{:keys [db params]}]
+  (let [dt ($/datetime-for-stamp (Integer/parseInt (:at params)))]
+    (case (db/scheduled-trips-at db dt))))
+
+(defapi trips-at ::api/trips-at-request
+  [{:keys [db conformed]}]
+  (let [conform-key (first conformed)
+        {:keys [day at stamp]} (second conformed)
+        dt (case conform-key
+             ::api/date-time (.. ($/date-for-str day) (atTime ($/time-for-str at)))
+             ::api/stamp ($/datetime-for-stamp (Integer/parseInt at)))]
+    (db/scheduled-trips-at db dt)))
+
 (defroutes handler
   (GET "/find_stops" []  find-stops)
   (GET "/trips_for_stop" [] trips-for-stop)
   (GET "/trip_performance" []  trip-performance)
-  (GET "/debug" req (prn-str req))
+  (GET "/services" [] services-at)
+  (GET "/trips_at" [] trips-at)
 
   ;; MBTA Performance API:
   (GET "/dwells" [] dwells)
