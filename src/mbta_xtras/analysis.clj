@@ -11,7 +11,10 @@
           done (async/timeout wait)
           result (promise)]
       (go-loop [changed #{}]
-        (alt! done (deliver result changed)
+        (alt! done (do
+                     (async/untap mult in)
+                     (async/close! in)
+                     (deliver result changed))
               in ([update]
                   (recur (conj changed [(:trip-id update) (:trip-start update)])))))
       result)
