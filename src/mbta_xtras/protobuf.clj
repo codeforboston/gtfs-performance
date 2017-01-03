@@ -3,7 +3,6 @@
             [clojure.java.io :as io]
             [clojure.spec :as s]
             [environ.core :refer [env]]
-            [mbta-xtras.db :as db]
             [taoensso.timbre :refer [log info error]]
             [clojure.string :as str])
 
@@ -72,8 +71,8 @@
                           :id (str trip-id "-" start-date "-" (.getStopId stop-update))}
 
                          (if (= rel :scheduled)
-                           {:arrival-time (.. stop-update getArrival getTime)
-                            :departure-time (.. stop-update getDeparture getTime)}
+                           {:arrival-time (long (.. stop-update getArrival getTime))
+                            :departure-time (long (.. stop-update getDeparture getTime))}
 
                            {:schedule-relationship (str rel)}))))
                     (.getStopTimeUpdateList tu)))))))
