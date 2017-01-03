@@ -1,6 +1,8 @@
 (ns mbta-xtras.system
   (:require [com.stuartsierra.component :as component]
+            [environ.core :refer [env]]
             [mbta-xtras
+             [db :refer [make-updater]]
              [mongo :as mongo]
              [trip-performance :refer [make-recorder]]
              [web :as web]]
@@ -12,10 +14,10 @@
 (timbre/merge-config!
  {:appenders {:rotor (assoc (rotor-appender
                              {:path "logs/log.log"
-                              :max-size (* 10 1024 1024)})
+                              :max-size (* 20 1024 1024)
+                              :backlog 1})
                             :output-fn (partial timbre/default-output-fn
-                                                {:stacktrace-fonts {}}))
-              :println nil}})
+                                                {:stacktrace-fonts {}}))}})
 
 (defn api-system
   "Returns a new system map describing the default components of the application
@@ -25,8 +27,13 @@
   (component/system-map
    :mongo (mongo/make-mongo)
    :recorder (component/using
-              (make-recorder)
+              (make-recorder (some-> (env :postprocess-interval)
+                                     (Integer/parseInt)
+                                     (* 1000)))
               {:mongo :mongo})
+   :gtfs-updater (component/using
+                  (make-updater)
+                  {:mongo :mongo})
    :webserver (component/using
                (web/make-server)
                {:mongo :mongo})))

@@ -1,5 +1,7 @@
 (ns mbta-xtras.trip-performance
-  (:require [clojure.core.async :as async :refer [<! alt! chan go-loop timeout]]
+  (:require [clojure.core.async :as async :refer [<! alt! chan go-loop
+                                                  sliding-buffer tap timeout]]
+            [clojure.core.memoize :refer [lru]]
             [clojure.spec :as s]
             [environ.core :refer [env]]
             [com.stuartsierra.component :as component]
@@ -16,10 +18,22 @@
              [core :as mg]]
             [clojure.java.io :as io]
 
-            [taoensso.timbre :refer [error]]
+            [taoensso.timbre :refer [error info]]
             [mbta-xtras.utils :as $])
   (:import [java.time LocalDate ZoneId]))
 
+
+(s/fdef stop-times
+        :args (s/cat :db ::xs/db
+                     :trip-id ::xs/trip-id
+                     :trip-start ::xs/trip-start)
+        :ret (s/coll-of ::xs/scheduled-stop))
+
+(s/fdef scheduled-arrivals
+        :args (s/cat :db ::xs/db
+                     :trip-id ::xs/trip-id
+                     :trip-start ::xs/trip-start)
+        :ret ::xs/scheduled-arrivals)
 
 (s/fdef add-stop-delay
         :args (s/cat :scheduled (s/map-of ::xs/stop-sequence ::xs/arrival-time)
@@ -32,17 +46,22 @@
                      :trip-start ::xs/trip-start)
         :ret (s/coll-of ::xs/stop-update))
 
+(s/fdef all-stops
+        :args (s/cat :scheduled ::xs/scheduled-arrivals
+                     :actual ::xs/stop-updates)
+        :ret ::xs/stop-updates)
+
+#_
+(s/fdef add-estimates
+        :args (s/cat :stops (s/coll-of (s/or ::xs/scheduled-stop
+                                             ::xs/stop-update)))
+        :ret (s/coll-of (s/and ::api)))
+
 (s/fdef trip-performance
         :args (s/cat :db ::xs/db
                      :trip-id ::xs/trip-id
                      :trip-start ::xs/trip-start)
         :ret (s/coll-of ::xs/stop-update))
-
-(s/fdef stop-times
-        :args (s/cat :db ::xs/db
-                     :trip-id ::xs/trip-id
-                     :trip-start ::xs/trip-start)
-        :ret (s/coll-of ::xs/scheduled-stop))
 
 (s/fdef process-trips
         :args (s/cat :db ::xs/db
@@ -51,7 +70,8 @@
 
 (s/fdef all-trips-for-day
         :args (s/cat :db ::xs/db
-                     :trip-start ::xs/trip-start))
+                     :trip-start ::xs/trip-start)
+        :ret (s/coll-of ::xs/trip-instance))
 
 (s/fdef trips-since
         :args (s/cat :db ::xs/db
@@ -60,22 +80,17 @@
 
 (s/fdef recent-trips
         :args (s/cat :db ::xs/db
-                     :duration int?))
+                     :duration int?)
+        :ret (s/coll-of ::xs/trip-instance))
 
 
-;; Stores when the trip estimates were last updated:
-(defonce last-run-info
-  (atom (try
-          (read-string (slurp "resources/run_info.txt"))
-          (catch java.io.FileNotFoundException _exc {})
-          (catch RuntimeException _exc {}))))
 
-(defonce write-last-run-info
-  (let [m (Object.)]
-    (add-watch last-run-info :writer
-               (fn [_k _r _o info]
-                 (locking m
-                   (spit "resources/run_info.txt" (prn-str info)))))))
+(s/fdef add-stop-delay
+        :args (s/cat :scheduled ::xs/scheduled-arrivals
+                     :stop ::xs/stop-update)
+        :ret (s/and ::xs/stop-update ::xs/scheduled-stop))
+;; End specs
+
 
 ;; Function definitions:
 (defn prep-collection [db mongo-coll]
@@ -83,21 +98,14 @@
                    (array-map :stop-id 1, :arrival-time 1))
   (mc/ensure-index db mongo-coll (array-map :id 1) {:unique true}))
 
-(defn trip-ids-for-date
-  ([db date-str]
-   (into #{} (map :trip-id)
-         (mc/find-maps db "trip-stops" {:trip-start date-str})))
-  ([db]
-   (trip-ids-for-date db (date-str (LocalDateTime/now)))))
-
 (defn stop-times
   [db trip-id trip-start]
   (let [ref-date (datetime-for-str trip-start)
         xf (map (fn [{at :arrival-time, dt :departure-time,
                       ss :stop-sequence, :as stop-time}]
-                  [(Integer/parseInt ss)
+                  [($/->int ss)
                    (-> (dissoc stop-time :_id)
-                       (assoc :stop-sequence (Integer/parseInt ss)
+                       (assoc :stop-sequence ($/->int ss)
                               :scheduled-arrival (->stamp (offset-time ref-date at))
                               :scheduled-departure (->stamp (offset-time ref-date dt))
                               :scheduled? true
@@ -113,26 +121,17 @@
   (into (sorted-map)
         (let [ref-date (datetime-for-str trip-start)]
           (map (fn [{at :arrival-time, ss :stop-sequence}]
-                 [(Integer/parseInt ss) (->stamp (offset-time ref-date at))])))
+                 [ss (->stamp (offset-time ref-date at))])))
         (db/stop-times-for-trip db trip-id)))
-
-(defn scheduled-arrival
-  [db trip-start trip-id stop-sequence]
-  (when-let [st (mc/find-one-as-map db "stop-times"
-                                    {:trip-id trip-id
-                                     :stop-sequence stop-sequence})]
-    (-> trip-start
-        (datetime-for-str trip-start)
-        (offset-time (:arrival-time st))
-        (->stamp))))
 
 (defn add-stop-delay
   [scheduled stop]
   (when-let [sched (scheduled (:stop-sequence stop))]
     (merge
      (dissoc stop :_id)
-     {:delay (- (:arrival-time stop) sched)
-      :scheduled-arrival sched})))
+     (when-let [{at :arrival-time} stop]
+       {:delay (- at sched)})
+     {:scheduled-arrival sched})))
 
 (defn observed-trip-performance
   "Returns a sequence of trip stops for a trip-id on a given start date,
@@ -149,13 +148,14 @@
   "Merge the stops into a single sequence, ordered by :stop-sequence.
   `scheduled` must be a sorted map."
   [scheduled actual]
-  (map (fn [i] (or (actual i) (scheduled i)))
+  (map (fn [i] (or (actual i)
+                   (dissoc (scheduled i) :arrival-time :departure-time)))
        (keys scheduled)))
 
 (defn add-estimates
   "Takes a joined sequence of stops, scheduled and unscheduled, ordered by stop
   sequence. Finds any sub-sequences that have no observed arrival time and
-  attempts to  estimate their arrival times. Returns a complete collection of
+  attempts to estimate their arrival times. Returns a complete collection of
   stops with estimates added when possible. Recuse until all-stops is completely
   consumed."
   [all-stops & [last-obs]]
@@ -181,11 +181,12 @@
                                             obs-duration)]
                                (assoc scheduled-stop
                                       :id (str (:trip-id scheduled-stop) "-"
-                                               (:trip-start ))
-                                      :arrival-time (+ last-arrival delay)
-                                      :departure-time (+ (:departure-time
-                                                          last-obs) delay)
-                                      :delay delay
+                                               (:trip-start scheduled-stop) "-"
+                                               (:stop-id scheduled-stop))
+                                      :arrival-time (long (+ last-arrival delay))
+                                      :departure-time (long (+ (:departure-time
+                                                                last-obs) delay))
+                                      :delay (int delay)
                                       :estimation-method "interpolated"
                                       :estimated? true)))
                            sched))
@@ -205,14 +206,12 @@
                                                  obs-delay)]
 
                                (assoc scheduled-stop
-                                      :arrival-time (+ scheduled-arrival stop-delay)
-                                      :departure-time (+ scheduled-departure
-                                                         stop-delay)
+                                      :arrival-time (long (+ scheduled-arrival stop-delay))
+                                      :departure-time (long (+ scheduled-departure stop-delay))
                                       :delay (int stop-delay)
-                                      :shift-delay obs-delay
+                                      :shift-delay (int obs-delay)
                                       :estimated? true)))
-                           sched))
-                    )
+                           sched)))
 
                   ;; We have only the schedule! Don't bother estimating.
                   sched)
@@ -248,14 +247,14 @@
   between two stops in the specified date range. See docs for a detailed
   walkthrough of the implementation and assumptions."
   [db from-stop to-stop from-dt to-dt]
-  (let [from-stops (mc/find-maps db "trip-stops" {:stop-id from-stop
-                                                  :arrival-time {:$gte from-dt
-                                                                 :$lte to-dt}})
+  (let [from-stops (mc/find-maps db "processed-trip-stops" {:stop-id from-stop
+                                                            :arrival-time {:$gte from-dt
+                                                                           :$lte to-dt}})
         trip-ids (into #{} (map :trip-id) from-stops)
-        to-stops (mc/find-maps db "trip-stops" {:stop-id to-stop
-                                                :arrival-time {:$gte from-dt
-                                                               :$lte to-dt}
-                                                :trip-id {:$in trip-ids}})
+        to-stops (mc/find-maps db "processed-trip-stops" {:stop-id to-stop
+                                                          :arrival-time {:$gte from-dt
+                                                                         :$lte to-dt}
+                                                          :trip-id {:$in trip-ids}})
         trip-ends (index-by (juxt :trip-id :trip-start) to-stops)
         trips (index-by :trip-id (mc/find-maps db "trips"
                                                {:trip-id {:$in trip-ids}}
@@ -266,7 +265,7 @@
     ;; post-processing and have :scheduled-arrival, etc.
     (keep (fn [from-stop]
             (when-let [to-stop (trip-ends [(:trip-id from-stop)
-                                           (:start-date from-stop)])]
+                                           (:trip-start from-stop)])]
               (let [bench (- (:scheduled-arrival to-stop)
                              (:scheduled-departure from-stop))
                     trip (trips (:trip-id from-stop))]
@@ -297,85 +296,105 @@
 
 (defn all-trips-for-day
   [db date-str]
-  (map (fn [trip-id] [date-str trip-id])
+  (map (fn [trip-id] [trip-id date-str])
        (mc/distinct db "trip-stops" :trip-id {:trip-start date-str})))
 
-(defn all-trips
-  "Returns an infinite sequence of [date-str trip-id] pairs, where date-str is
-  in descending order."
-  [db]
-  (mapcat (partial all-trips-for-day db)
-          ($/date-strs)))
+(defn process-trip
+  [db trip-id trip-start]
+  (doseq [stop (trip-performance db trip-id trip-start)]
+    (let [id (str trip-id "-" trip-start "-" (:stop-id stop))]
+      (mc/upsert db "processed-trip-stops" {:id id} {:$set (assoc stop :id id)}))))
 
 (defn process-trips
-  ""
+  "Perform post-processing on the given trip instances (trip-id, trip-start
+  pairs). Retrieve the observed stops, add delays and estimates, and save back
+  to the database."
   [db trip-instances]
   (doseq [[trip-id trip-start] trip-instances]
-    (doseq [stop (trip-performance db trip-id trip-start)]
-      (let [id (str trip-id "-" trip-start "-" (:stop-id stop))]
-        (mc/upsert db "trip-stops" {:id id} {:$set (assoc stop :id id)})))))
+    (try
+      (process-trip db trip-id trip-start)
+      (info "Processing successful: " trip-id trip-start)
+
+      (catch Exception exc
+        (error exc "encountered error while processing trip:"
+               [trip-id trip-start])))))
 
 (defn post-loop
-  "Start the trip-stop post-processing loop. Fill in gaps in the trip-stops and
-  save so that things like travel-times will be able to work efficiently."
-  ([db last-run]
-   (let [stop (chan)]
-     (go-loop [last-run last-run]
-       (process-trips db (trips-since db last-run))
+  "Start the trip-stop post-processing loop. Fill in gaps in the trip-stops
+  collection and save, so that things like travel-times will be able to work
+  efficiently."
+  ([db updates-mult ms]
+   (let [stop (chan)
+         changed-trips (atom #{})
+         updates (tap updates-mult (chan (sliding-buffer 100)))]
+     (go-loop [changed-trips #{}, interval (timeout ms)]
+       (alt!
+         ;; When the timeout expires, process the changed trips and recur with an
+         ;; empty set and a fresh timeout channel.
+         interval (do
+                    (info "Processing trips:" changed-trips)
+                    (process-trips db changed-trips)
+                    (recur #{} (timeout ms)))
 
-       (let [stamp (/ (System/currentTimeMillis) 1000)]
-         (alt!
-           (timeout 3600000) (recur stamp)
+         ;; Record changed trips:
+         updates ([update]
+                  (recur (conj changed-trips
+                               [(:trip-id update) (:trip-start update)])
+                         interval))
 
-           stop nil)))
+         ;; If the stop chan is closed, exit the loop
+         stop nil))
      stop))
-  ([db]
-   (post-loop db (/ (System/currentTimeMillis) 1000))))
+  ([db updates-mult]
+   (post-loop db updates-mult 3600000)))
+
+
+(defn- trip-info-fn
+  "Returns a memoized function that retrieves information about trips."
+  [db]
+  (lru (fn trip-info [trip-id]
+         (select-keys
+          (mc/find-one-as-map db "trips" {:trip-id trip-id})
+          [:direction-id :route-id]))
+       :lru/threshold 500))
 
 (defn read-updates-into-db
   "Pull trip stop updates continually and insert them into the given Mongo
   database and column. Returns a stop channel that will halt fetching of results
-  and insertion when closed or given a value."
-  [db coll]
-  (prep-collection db coll)
-  (let [in (chan (async/sliding-buffer 100) nil
+  and insertion when closed or given a value and a mult that can be tapped for
+  trip updates."
+  [db]
+  (prep-collection db "trip-stops")
+  (let [updates-in (chan (sliding-buffer 100) nil
                  #(error "Encountered an exception in trip update loop:" %))
-        stop (trip-updates->! in)
-        ;; updates-in (chan (async/sliding-buffer 100))
-        ;; stop (trip-updates->! updates-in)
-        ;; updates (async/mult updates-in)
-        ;; in (async/tap updates (chan (async/sliding-buffer 100)))
-        ]
+        stop (trip-updates->! updates-in)
+        updates-mult (async/mult updates-in)
+        in (tap updates-mult (chan (sliding-buffer 100)))
+        trip-info (trip-info-fn db)]
     (go-loop []
       (when-let [trip-stop (<! in)]
-        (mc/upsert db coll
+        (mc/upsert db "trip-stops"
                    {:id (:id trip-stop)}
                    {:$set trip-stop})
         (recur)))
-    stop))
+    [stop updates-mult]))
 
-(defrecord PostProcessing []
+
+(defrecord TripPerformanceRecorder [interval]
   component/Lifecycle
   (start [this]
-    (assoc this
-           :stop-chan (post-loop (-> this :mongo :db)
-                                 (.. (LocalDate/now)
-                                     (atStartOfDay (ZoneId/of $/default-time-zone))
-                                     (toEpochSecond)))))
-
-  (stop [this]
-    (some-> (:stop-chan this) (async/close!))))
-
-
-(defrecord TripPerformanceRecorder [coll]
-  component/Lifecycle
-  (start [this]
-    (assoc this
-           :stop-chan (read-updates-into-db (-> this :mongo :db) coll)))
+    (let [db (-> this :mongo :db)
+          [stop-chan updates-mult] (read-updates-into-db db)]
+      (assoc this
+             :mult updates-mult
+             :stop-chan stop-chan
+             :post-stop-chan (post-loop db updates-mult interval)))) 
 
   (stop [this]
     (some-> (:stop-chan this) (async/close!))
-    (dissoc this :stop-chan)))
+    (some-> (:post-stop-chan this) (async/close!))
+    (some-> (:mult this) (async/untap-all))
+    (dissoc this :mult :stop-chan :post-stop-chan)))
 
-(defn make-recorder []
-  (->TripPerformanceRecorder (env :trip-stops-collection "trip-stops")))
+(defn make-recorder [[postprocess-interval]]
+  (->TripPerformanceRecorder (or postprocess-interval 600000)))
