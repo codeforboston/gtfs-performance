@@ -8,6 +8,7 @@
 
 (s/def ::estimated? boolean?)
 (s/def ::positive-int-str (s/and string? #(re-matches #"\d+")))
+(s/def ::stamp (s/and int? pos?))
 (s/def ::stop-id string?)
 (s/def ::stop-name string?)
 (s/def ::sch-arr-dt ::positive-int-str)
@@ -23,6 +24,7 @@
 (s/def ::delay int?)
 (s/def ::scheduled-arrival pos-int?)
 (s/def ::scheduled-departure pos-int?)
+(s/def ::scheduled-arrivals (s/map-of ::stop-sequence ::arrival-time))
 (s/def ::date-str
   (s/with-gen
     (s/and string? #(re-matches #"\d{4}\d{2}\d{2}" %))
@@ -36,13 +38,16 @@
                                        :max end}))))))
 
 (s/def ::trip-start ::date-str)
+(s/def ::time-str
+  (s/and string? #(re-matches #"\d\d:\d\d:\d\d" %)))
 
-(s/def ::date-trip
-  (s/cat ::trip-start ::trip-id))
+(s/def ::trip-instance
+  (s/cat :trip-id ::trip-id
+         :trip-start ::trip-start))
 
 (s/def ::stop-update
   (s/and (s/keys :req-un [::stop-id ::stop-sequence ::arrival-time ::trip-id
-                          ::trip-start] 
+                          ::trip-start]
                  :opt-un [::delay ::departure-time ::scheduled-arrival])
          #(or (not (:departure-time %))
               (> (:departure-time %) (:arrival-time %)))))
@@ -51,14 +56,10 @@
   (s/keys :req-un [::stop-id ::stop-sequence ::scheduled-arrival
                    ::scheduled-departure ::trip-id ::trip-start]))
 
+
 ;; TODO Create a generator that generates stops in order
 (s/def ::stop-updates
   (s/coll-of ::stop-update))
-#_
-(s/def ::stop-updates
-  (s/with-gen (s/coll-of ::stop-update)
-    (fn []
-       )))
 
 (s/def ::stop-description
   (s/keys :req-un [::stop-sequence ::stop-id ::stop-name ::sch-arr-dt
@@ -68,5 +69,3 @@
   (s/keys :req-un [::route-id ::route-name ::trip-id ::trip-name ::direction-id
                    ::direction-name ::stop]))
 
-#_
-(clojure.spec.gen/generate (s/gen ::stop-updates))

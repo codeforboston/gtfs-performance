@@ -64,20 +64,36 @@
   (s/keys :req-un [::stop-id]))
 
 (s/def ::trip-updates-request
-  (s/keys ::req-un [::trip-id ::trip-start]))
+  (s/keys :req-un [::trip-id ::trip-start]))
 (s/def ::trip-updates-response
-  (s/keys ::req-un []))
+  (s/keys :req-un []))
 
 ;; Headways
 (s/def ::stop ::stop-id)
 (s/def ::route ::route-id)
 (s/def ::headways-request
-  (s/keys ::req-un [::stop ::from-datetime ::to-datetime]
-          ::opt-un [::to-stop ::route]))
+  (s/keys :req-un [::stop ::from-datetime ::to-datetime]
+          :opt-un [::to-stop ::route]))
 
 ;; Daily Metrics
 (s/def ::daily-metrics-request
   map?)
+
+
+;; Services request
+(s/def ::services-request
+  (s/or :at (s/keys :req-un [::at])
+        :date-str (s/keys :req-un [::xs/date-str])))
+
+(s/def ::services-request
+  (s/keys :req-un [::at]))
+
+(s/def ::day ::xs/date-str)
+(s/def ::at ::xs/time-str)
+(s/def ::timestamp ::timestamp-str)
+(s/def ::trips-at-request
+  (s/or :date-time (s/keys :req-un [::day ::at])
+        :stamp (s/keys :req-un [::timestamp])))
 
 (s/def ::current-metrics-request
   map?)
@@ -119,16 +135,17 @@
 
 (defn api-endpoint [spec f]
   (fn [{:keys [params] :as req}]
-    (if-let [expl (s/explain-data spec params)]
-      ;; Respond with a user error if the request params do not conform to the
-      ;; API specification.
-      {:status 400
-       :headers {"Content-type" "application/json"}
-       :body (json/write-str {:errors (error-message expl)
-                              :request-params params}
-                             :key-fn keyfn)}
+    (let [conformed (s/conform spec params)]
+      (if (= conformed ::s/invalid)
+          ;; Respond with a user error if the request params do not conform to the
+          ;; API specification.
+          {:status 400
+           :headers {"Content-type" "application/json"}
+           :body (json/write-str {:errors (error-message (s/explain-data spec params))
+                                  :request-params params}
+                                 :key-fn keyfn)}
 
-      (wrap-json (f req)))))
+          (wrap-json (f (assoc req :conformed conformed)))))))
 
 (defmacro defapi [name spec params & body]
   `(def ~name (api-endpoint ~spec (fn ~params ~@body))))
