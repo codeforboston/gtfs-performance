@@ -36,33 +36,10 @@
     (coll? v) (mapv convert-json v)
     :else v))
 
-(defmacro map-from [x & {:as  k-exprs}]
-  (let [l (gensym)]
-    `(let [~l ~x]
-       (hash-map ~@(mapcat (fn [[k expr]]
-                             (list k `(-> ~l ~expr)))
-                           k-exprs)))))
-
-;; "direction-id" : "0",
-;; "service-id" : "CapeFlyer-Friday-2016",
-;; "trip-headsign" : "Hyannis",
-;; "trip-id" : "CapeFlyer-Friday-2016-9001",
-;; "block-id" : "",
-;; "shape-id" : "cf00002",
-;; "route-id" : "CapeFlyer",
-;; "wheelchair-accessible" : "1",
-;; "trip-short-name" : "9001"
-
 
 ;; MBTA
 (def mbta-base-url (java.net.URL. "http://realtime.mbta.com/developer/api/v2/"))
 
-
-(defn convert-stop [stop]
-  (map-from stop
-            :stop-sequence (-> :stop-sequence Integer/parseInt)
-            :arrival-time :sch-arr-dt
-            :departure-time :sch-dep-dt))
 
 (defn mbta-url [path & [params]]
   (java.net.URL. mbta-base-url (str path (when params (str "?" (encode-params params))))))
