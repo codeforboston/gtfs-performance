@@ -4,7 +4,7 @@
             [clojure.string :as str]
             [environ.core :refer [env]]
             [mbta-xtras.utils :as $])
-  (:import [java.time LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
+  (:import [java.time DayOfWeek LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
            [java.time.format DateTimeFormatter]
            [java.time.temporal ChronoUnit]))
 
@@ -26,15 +26,6 @@
                                            :increment integer?))
         :ret (s/coll-of string?))
 
-;; (s/fdef datetime-for-str
-;;         :args (s/alt :timezone (s/cat :date ::api/date-str
-;;                                       :tz ::api/timezone)
-;;                      :default (s/cat :date ::api/date-str))
-;;         :ret (partial instance? ZonedDateTime))
-
-#_
-(s/fdef ->stamp
-        :args (s/cat :x))
 
 ;; Function definitions:
 ;; java.time helpers
@@ -61,12 +52,22 @@
   [date-str]
   (LocalDate/parse date-str date-format))
 
+(defn local-date-for-str
+  [date-str]
+  (LocalDate/parse date-str date-format))
+
+(defn local-datetime-for-str
+  [date-str]
+  (LocalDateTime/parse date-str date-format))
+
+(defn local-datetime-for-str
+  [date-str]
+  (. (LocalDate/parse date-str date-format)
+     (atStartOfDay)))
+
 (defn datetime-for-str
   ([date-str tz]
-   (-> date-str
-       (LocalDate/parse date-format)
-       (LocalDateTime/of LocalTime/MIDNIGHT)
-       (ZonedDateTime/of (ZoneId/of tz))))
+   (ZonedDateTime/of (local-datetime-for-str date-str) (ZoneId/of tz)))
   ([date-str]
    (datetime-for-str date-str default-time-zone)))
 
@@ -79,12 +80,21 @@
 (defn date-strs
   "Returns a lazy sequence of date strings (yyyyMMdd)."
   ([start-date increment]
-   (lazy-seq (cons ($/date-str start-date)
+   (lazy-seq (cons (date-str start-date)
                    (date-strs (. start-date plusDays increment)))))
   ([start-date]
    (date-strs start-date -1))
   ([]
    (date-strs (LocalDate/now) -1)))
+
+(def time-format (DateTimeFormatter/ofPattern "HH:mm:ss"))
+
+(defn time-str [time]
+  (.format time time-format))
+
+(defn time-for-str [time-str]
+  (LocalTime/parse time-str time-format))
+
 
 (defn set-hours
   [dt h]
@@ -96,6 +106,11 @@
         (.plusHours (rem h 24)))
 
     (.withHour dt h)))
+
+(defn day-keyword [dt]
+  (keyword (str/lower-case (.. dt getDayOfWeek name))))
+
+(def day-keywords (map #(keyword (str/lower-case (.name %))) (DayOfWeek/values)))
 
 ;; In the manifest, trip stop times are reported as offsets from the start of
 ;; the day when the trip runs.
@@ -137,3 +152,7 @@
 
 (defn index-by [k coll]
   (into {} (map (juxt k identity)) coll))
+
+(defn ->int [x]
+  (cond (string? x) (Integer/parseInt x)
+        (integer? x) x))

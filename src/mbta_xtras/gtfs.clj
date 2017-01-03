@@ -7,7 +7,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
 
-            [mbta-xtras.utils :as $])
+            [mbta-xtras.utils :as $]
+            [clojure.core.async :as async])
   (:import [java.time Instant ZonedDateTime]
            [java.time.format DateTimeFormatter]
            [java.util.zip ZipInputStream]))
@@ -28,18 +29,12 @@
 (defn http-date-time [s]
   (.parse DateTimeFormatter/RFC_1123_DATE_TIME s))
 
-(defonce agencies (atom {}))
-(defonce feed-info (atom nil))
-(defonce calendar (atom nil))
-
 (defn last-modified [resp]
   (some-> resp
           (get-in [:headers "last-modified"])
           (http-date-time)
-          (Instant/from)))
-
-(defn info-last-modified []
-  (last-modified @(aleph.http/head (or feed-info-url manifest-url))))
+          (Instant/from)
+          (.getEpochSecond)))
 
 (defn download-zip
   "Saves the GTFS file specified in the environment to file and returns a
@@ -78,9 +73,10 @@
   (fn [vals]
     (into {} (map vector fields vals))))
 
-(defn csv-to-maps [[header & rows]]
-  (let [fields (map (comp keyword hyphenate) header)]
-    (map (vec->map fields) rows)))
+(defn reader-maps [csv-rdr]
+  (let [[header & rows] (read-csv csv-rdr)]
+    (let [fields (map (comp keyword hyphenate) header)]
+            (map (vec->map fields) rows))))
 
 (defn latest-feed-info
   "Retrieves the latest feed info."
@@ -93,8 +89,7 @@
                       entry (zip-seek zip-in "feed_info.txt")]
                   zip-in))]
     (-> (io/reader input)
-        (read-csv)
-        (csv-to-maps)
+        (reader-maps)
         (first)
         (assoc :modified (last-modified resp)))))
 
@@ -107,9 +102,9 @@
     (go-loop [info nil]
       (let [to (timeout (or interval 86400000))]
         (if (or (not info)
-                (pos? (.compareTo (last-modified @(http/head (or feed-info-url
-                                                                 manifest-url)))
-                                  (:modified info))))
+                (> (last-modified @(http/head (or feed-info-url
+                                                  manifest-url)))
+                   (:modified info)))
           (let [new-info (latest-feed-info)]
             ;; Exit if the out-chan is closed, otherwise, repeat loop.
             (when (or (= new-info info)
@@ -122,44 +117,11 @@
             (recur info)))))
     out-chan))
 
-(defn iterate-csv []
+(defn iterate-gtfs-files
+  "Returns a lazy sequence of [file_name, map-seq] from the latest GTFS
+  manifest."
+  []
   (let [resp @(http/get manifest-url)
         input (ZipInputStream. (:body resp))]
-    (map (fn [entry] [(.getName entry) (csv-to-maps (read-csv (io/reader
-                                                               input)))])
+    (map (fn [entry] [(.getName entry) (io/reader input)])
          (zip-entries input))))
-
-(defn get-csv [gtfs-path file-name]
-  (when-not (.exists (io/file gtfs-path))
-    (download-zip gtfs-path))
-  (-> (zip-reader gtfs-path file-name)
-      (read-csv)
-      (csv-to-maps)))
-
-(defn get-trips []
-  (get-csv gtfs-path "trips.txt"))
-
-(defn get-stop-times []
-  (get-csv gtfs-path "stop_times.txt"))
-
-(defn get-stops []
-  (get-csv gtfs-path "stops.txt"))
-
-(defn get-shapes []
-  (get-csv gtfs-path "shapes.txt"))
-
-(defn get-agencies []
-  (into {} (map (juxt :agency-id identity))
-        (get-csv gtfs-path "agency.txt")))
-
-(defn get-calendar []
-  (into {} (map (juxt :service-id identity))
-        (get-csv gtfs-path "calendar.txt")))
-
-(defn agency-info [id]
-  (get (or @agencies (swap! agencies merge (get-agencies))) id))
-
-(defn service-calendar [service-id]
-  (get (or @calendar
-           (reset! calendar (get-calendar)))
-       service-id))

@@ -48,7 +48,7 @@
 
 ;; Stop times
 (defn process-stop-time [x]
-  (update x :stop-sequence #(Integer/parseInt %)))
+  (update x :stop-sequence $/->int))
 
 (defn minc [a b]
   (if (neg? (compare a b)) a b))
@@ -95,36 +95,27 @@
 (def process-trip identity)
 
 
-(defn collection-swap [db coll-name docs]
-  (if (mc/exists? db coll-name)
-    (do (mc/insert-batch db (str "new-" coll-name) docs)
-        (mc/rename db coll-name (str coll-name "-" ($/today-str)))
-        (mc/rename db (str "new-" coll-name) coll-name))
-    (mc/insert-batch db coll-name docs)))
-
-
 (defmulti process-csv! (fn [[x] _] x))
 (defmethod process-csv! :default [_ _] nil)
 (defmethod process-csv! "stops.txt"
-  [[_ stops] db]
-  (collection-swap db "stops" (map process-stop stops)))
+  [[_ rdr] db]
+  (mc/insert-batch db "stops" (map process-stop (gtfs/reader-maps rdr))))
 
 (defmethod process-csv! "routes.txt"
-  [[_ routes] db]
-  (collection-swap db "routes" routes))
+  [[_ rdr] db]
+  (mc/insert-batch db "routes" rdr))
 
 (defmethod process-csv! "stop_times.txt"
-  [[_ stop-times] db]
+  [[_ rdr] db]
   ;; Add the stops times in batches
-  (doseq [stop-times-group (partition 20000 (map process-stop-time stop-times))]
-    (mc/insert-batch db "new-stop-times" stop-times-group))
-  (when (mc/exists? db "stop-times")
-    (mc/rename db (str "stop-times-" ($/today-str))))
-  (mc/rename db "new-stop-times" "stop-times"))
+  (doseq [stop-times-group (->> (gtfs/reader-maps rdr)
+                                (map process-stop-time)
+                                (partition 20000))]
+    (mc/insert-batch db "stop-times" stop-times-group)))
 
 (defmethod process-csv! "trips.txt"
-  [[_ trips] db]
-  (collection-swap db "trips" trips))
+  [[_ rdr] db]
+  (mc/insert-batch db "trips" (gtfs/reader-maps rdr)))
 
 (defn process-service [service]
   (reduce (fn [service k]
@@ -133,11 +124,11 @@
           $/day-keywords))
 
 (defmethod process-csv! "calendar.txt"
-  [[_ service-dates] _db]
+  [[_ rdr] _db]
   (reset! calendar (into {} (map (fn [service]
                                    [(:service-id service)
                                     (process-service service)])
-                                 service-dates))))
+                                 (gtfs/reader-maps rdr)))))
 
 (defn process-service-exceptions [service-exceptions]
   (reduce (fn [m exc]
@@ -148,18 +139,18 @@
           service-exceptions))
 
 (defmethod process-csv! "calendar_dates.txt"
-  [[_ service-exceptions] _db]
-  (let [excs (process-service-exceptions service-exceptions)]
+  [[_ rdr] _db]
+  (let [excs (process-service-exceptions (gtfs/reader-maps rdr))]
     (reset! no-service (get excs "2"))
     (reset! xtra-service (get excs "1"))))
 
 (defmethod process-csv! "agency.txt"
-  [[_ new-agencies] _db]
-  (reset! agencies ($/index-by :agency-id new-agencies)))
+  [[_ rdr] _db]
+  (reset! agencies ($/index-by :agency-id (gtfs/reader-maps rdr))))
 
 (defmethod process-csv! "transfers.txt"
-  [[_ new-transfers] _db]
-  (reset! transfers new-transfers))
+  [[_ rdr] _db]
+  (reset! transfers (gtfs/reader-maps rdr)))
 
 ;; Ignore calendar_dates.txt, fare_attributes.txt, fare_rules.txt,
 ;; frequencies.txt, shapes.txt
