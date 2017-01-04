@@ -279,6 +279,20 @@
                  :direction (:direction-id trip)})))
           from-stops)))
 
+(defn dwell-times
+  [db stop-id from-dt to-dt & [{:keys [route-id direction-id]}]]
+  (let [stops (mc/find-maps db "trip-stops" {:arrival-time {:$gte from-dt}
+                                             :departure-time {:$lte to-dt}
+                                             :stop-id stop-id})]
+    (map (fn [{at :arrival-time, dt :departure-time
+               route :route-id, dir :direction-id}]
+           {:route_id route
+            :direction dir
+            :arr_dt (str at)
+            :dep_dt (str dt)
+            :dwell_time_sec (str (- dt at))})
+         stops)))
+
 (defn trips-since
   "Find the unique trips (trip_id + trip_start_date) that have run since the
   given stamp."
