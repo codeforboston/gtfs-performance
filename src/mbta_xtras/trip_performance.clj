@@ -175,10 +175,12 @@
                           sch-duration (- (:scheduled-arrival next-obs)
                                           (:scheduled-arrival last-obs))]
                       (map (fn [scheduled-stop]
-                             (let [delay (* (/ (- (:scheduled-arrival scheduled-stop)
-                                                  (:scheduled-arrival last-obs))
-                                               sch-duration)
-                                            obs-duration)]
+                             (let [delay (if (zero? sch-duration)
+                                           0
+                                           (* (/ (- (:scheduled-arrival scheduled-stop)
+                                                    (:scheduled-arrival last-obs))
+                                                 sch-duration)
+                                              obs-duration))]
                                (assoc scheduled-stop
                                       :id (str (:trip-id scheduled-stop) "-"
                                                (:trip-start scheduled-stop) "-"
@@ -201,9 +203,11 @@
                           sch-duration (- (:scheduled-arrival next-obs) sch-start)]
                       (map (fn [{:keys [scheduled-arrival scheduled-departure]
                                  :as scheduled-stop}]
-                             (let [stop-delay (* (/ (- scheduled-arrival sch-start)
-                                                    sch-duration)
-                                                 obs-delay)]
+                             (let [stop-delay (if (zero? sch-duration)
+                                                0
+                                                (* (/ (- scheduled-arrival sch-start)
+                                                      sch-duration)
+                                                   obs-delay))]
 
                                (assoc scheduled-stop
                                       :arrival-time (long (+ scheduled-arrival stop-delay))
