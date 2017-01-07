@@ -261,23 +261,23 @@
                                                {:direction-id 1, :route-id 1,
                                                 :trip-id 1}))]
 
-    ;; For now, let's assume that all trip stops have gone through
-    ;; post-processing and have :scheduled-arrival, etc.
-    (keep (fn [from-stop]
-            (when-let [to-stop (trip-ends [(:trip-id from-stop)
-                                           (:trip-start from-stop)])]
-              (let [bench (- (:scheduled-arrival to-stop)
-                             (:scheduled-departure from-stop))
-                    trip (trips (:trip-id from-stop))]
-                {:dep-dt (str (:departure-time from-stop))
-                 :arr-dt (str (:arrival-time to-stop))
-                 :travel-time-sec (- (:arrival-time to-stop) (:departure-time
-                                                              from-stop))
-                 :estimated (or (:estimated? from-stop) (:estimated? to-stop))
-                 :benchmark-travel-time-sec bench
-                 :route-id (:route-id trip)
-                 :direction (:direction-id trip)})))
-          from-stops)))
+    (->> from-stops
+         (keep (fn [from-stop]
+                 (when-let [to-stop (trip-ends [(:trip-id from-stop)
+                                                (:trip-start from-stop)])]
+                   (let [bench (- (:scheduled-arrival to-stop)
+                                  ;; TODO: Use departure:
+                                  (:scheduled-arrival from-stop))
+                         trip (trips (:trip-id from-stop))]
+                     {:dep-dt (str (:departure-time from-stop))
+                      :arr-dt (str (:arrival-time to-stop))
+                      :travel-time-sec (- (:arrival-time to-stop) (:departure-time
+                                                                   from-stop))
+                      :estimated (or (:estimated? from-stop) (:estimated? to-stop))
+                      :benchmark-travel-time-sec bench
+                      :route-id (:route-id trip)
+                      :direction (:direction-id trip)}))))
+         (sort-by :dep-dt))))
 
 (defn dwell-times
   [db stop-id from-dt to-dt & [{:keys [route-id direction-id]}]]
