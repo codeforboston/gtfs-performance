@@ -74,7 +74,7 @@
                            {:arrival-time (long (.. stop-update getArrival getTime))
                             :departure-time (long (.. stop-update getDeparture getTime))}
 
-                           {:schedule-relationship (str rel)}))))
+                           {:schedule-relationship (name rel)}))))
                     (.getStopTimeUpdateList tu)))))))
 
 (defn trip-updates->!
