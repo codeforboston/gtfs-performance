@@ -129,7 +129,7 @@
   (when-let [sched (scheduled (:stop-sequence stop))]
     (merge
      (dissoc stop :_id)
-     (when-let [{at :arrival-time} stop]
+     (when-let [at (:arrival-time stop)]
        {:delay (- at sched)})
      {:scheduled-arrival sched})))
 
