@@ -20,4 +20,4 @@
 
 
 (defn make-server []
-  (->WebServer (env :http-port 3141)))
+  (->WebServer (Integer/parseInt (env :http-port "3141"))))
