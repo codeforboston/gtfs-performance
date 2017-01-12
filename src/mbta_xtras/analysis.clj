@@ -4,6 +4,7 @@
             [monger.collection :as mc]
 
             [mbta-xtras.db :as db]
+            [mbta-xtras.protobuf :refer [vehicle-updates->]]
             [mbta-xtras.trip-performance :refer [travel-times]]
             [mbta-xtras.system :refer [system]]))
 
@@ -49,6 +50,22 @@
                                                                   :mult])
                                                   x))
                                    nil)))
+
+(def vehicle-updates nil)
+
+(defn tap-vehicles []
+  (alter-var-root #'vehicle-updates
+                  (fn [x]
+                    (or x (let [c (async/chan (async/sliding-buffer 100))]
+                            (vehicle-updates-> c)
+                            c)))))
+
+(defn untap-vehicles []
+  (alter-var-root #'vehicle-updates
+                  (fn [c]
+                    (when c
+                      (async/close! c)
+                      nil))))
 
 ; (travel-times (-> system :mongo :db) "70067" "70075" 1483562006 1483565521)
 
