@@ -93,11 +93,6 @@
 
 
 ;; Function definitions:
-(defn prep-collection [db mongo-coll]
-  (mc/ensure-index db mongo-coll
-                   (array-map :stop-id 1, :arrival-time 1))
-  (mc/ensure-index db mongo-coll (array-map :id 1) {:unique true}))
-
 (defn stop-times
   [db trip-id trip-start]
   (let [ref-date (datetime-for-str trip-start)
@@ -382,7 +377,6 @@
   and insertion when closed or given a value and a mult that can be tapped for
   trip updates."
   [db]
-  (prep-collection db "trip-stops")
   (let [updates-in (chan (sliding-buffer 100) nil
                  #(error "Encountered an exception in trip update loop:" %))
         stop (trip-updates->! updates-in)
