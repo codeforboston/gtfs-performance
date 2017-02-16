@@ -1,9 +1,7 @@
 (ns mbta-xtras.utils
-  (:require #_ [mbta-xtras.api-spec :as api]
-            [clojure.spec :as s]
+  (:require [clojure.spec :as s]
             [clojure.string :as str]
-            [environ.core :refer [env]]
-            [mbta-xtras.utils :as $])
+            [environ.core :refer [env]])
   (:import [java.time DayOfWeek LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
            [java.time.format DateTimeFormatter]
            [java.time.temporal ChronoUnit]))
@@ -150,8 +148,24 @@
 ;;     (handler (update-in req [:params] (fn
 ;;                                        )))))
 
-(defn index-by [k coll]
-  (into {} (map (juxt k identity)) coll))
+(defn index-by
+  ([k coll]
+   (into {} (map (juxt k identity)) coll))
+  ([k]
+   (map (juxt k identity))))
+
+(defn distinct-with [k]
+  (fn [rf]
+    (let [seen (volatile! #{})]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result input]
+         (let [v (k input)]
+           (if (contains? @seen v)
+                   result
+                   (do (vswap! seen conj v)
+                       (rf result input)))))))))
 
 (defn ->int [x]
   (cond (string? x) (Integer/parseInt x)

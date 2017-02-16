@@ -96,14 +96,16 @@
 
 
 (defmulti process-csv! (fn [[x] _] x))
-(defmethod process-csv! :default [_ _] nil)
+(defmethod process-csv! :default [[filename] _]
+  (info "Skipping " filename))
+
 (defmethod process-csv! "stops.txt"
   [[_ rdr] db]
   (mc/insert-batch db "stops" (map process-stop (gtfs/reader-maps rdr))))
 
 (defmethod process-csv! "routes.txt"
   [[_ rdr] db]
-  (mc/insert-batch db "routes" rdr))
+  (mc/insert-batch db "routes" (gtfs/reader-maps rdr)))
 
 (defmethod process-csv! "stop_times.txt"
   [[_ rdr] db]
