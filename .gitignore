@@ -11,3 +11,7 @@ pom.xml.asc
 .hg/
 logs/
 /script/credentials.json
+/resources/run_info.clj
+/resources/run
+/script/__pycache__/post_blob.cpython-35.pyc
+/TAGS

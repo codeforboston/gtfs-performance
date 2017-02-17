@@ -14,7 +14,8 @@
 
             [clojure.core.async :as async :refer [<! go-loop]]
             [clojure.string :as str]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [clojure.java.io :as io]))
 
 
 (defonce agencies (atom nil))
@@ -193,26 +194,47 @@
         (error "Error while processing" file-name exc))))
   (post-update db))
 
-(defn slurp-run-info []
+(defn slurp-forms [path]
   (try
-    (read-string (slurp "resources/run_info.clj"))
+    (read-string (slurp path))
     (catch Exception _
       nil)))
+
+(defn slurp-run-info []
+  (slurp-forms "resources/run_info.clj"))
+
+(defn slurp-calendar []
+  (slurp-forms "resources/run/calendar.clj"))
+
+(defn spit-atoms []
+  (. (io/file "resources/run") mkdirs)
+  (spit "resources/run/calendar.clj" (pr-str @calendar))
+  (spit "resources/run/no_service.clj" (pr-str @no-service))
+  (spit "resources/run/xtra_service.clj" (pr-str @xtra-service)))
+
+(defn slurp-atoms! []
+  (reset! calendar (slurp-forms "resources/run/calendar.clj"))
+  (reset! no-service (slurp-forms "resources/run/no_service.clj"))
+  (reset! xtra-service (slurp-forms "resources/run/xtra_service.clj")))
 
 (defn update-loop
   "Start a feed updates channel. Every time it reports an update, iterate over
   the contents of the GTFS zip and process the files."
   [db]
+  (slurp-atoms!)
   (let [updates (gtfs/feed-updates)]
     (go-loop []
       ;; The updates channel receives a non-nil message each time the feed is
-      ;; updated.
+      ;; updated or when the application starts.
       (when-let [info (<! updates)]
         (when (not= (:feed-version (slurp-run-info))
                     (:feed-version info))
           (do-update! db)
           (spit "resources/run_info.clj" (pr-str info)))
-        (recur)))
+        (recur))
+
+      ;; Exiting the update loop.
+      (spit-atoms))
     updates))
 
 
