@@ -4,6 +4,7 @@
             [mbta-xtras
              [db :refer [make-updater]]
              [mongo :as mongo]
+             [nrepl :as nrepl]
              [trip-performance :refer [make-recorder]]
              [web :as web]]
             [taoensso.timbre :as timbre]
@@ -39,7 +40,10 @@
                (web/make-server)
                {:mongo :mongo})))
 
-(def system (api-system))
+(def system
+  (let [nrepl-port (env :nrepl-server-port)]
+    (cond-> (api-system)
+      nrepl-port (assoc :nrepl-server (nrepl/make-server (Integer/parseInt nrepl-port))))))
 
 (defn start []
   (alter-var-root #'system component/start-system))

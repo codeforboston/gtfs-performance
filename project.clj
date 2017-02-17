@@ -19,7 +19,8 @@
                  [org.clojure/test.check "0.9.0"]
 
                  [com.taoensso/timbre "4.8.0-alpha1"]
-                 [selmer "1.10.5"]]
+                 [selmer "1.10.5"]
+                 [org.clojure/tools.nrepl "0.2.12"]]
   :java-source-paths ["src/java"]
   :main mbta-xtras.system
   :repl-options {:init-ns mbta-xtras.repl,

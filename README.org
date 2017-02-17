@@ -36,6 +36,8 @@
         post-processing on the trip-stops collection in order to make certain
         performance queries respond quickly. Set this variable to the number of
         seconds between post-processing runs.
+   - NREPL_SERVER_PORT :: Set to a number to bind an [[https://github.com/clojure/tools.nrepl][nREPL server]] to the
+        specified port. Allows you to use ~cider-connect~ in emacs, etc.
 
    You can also set these as Java system properties on start up. The system
    properties are the same as the environment variales, except downcased and
