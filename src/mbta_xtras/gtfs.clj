@@ -125,3 +125,8 @@
         input (ZipInputStream. (:body resp))]
     (map (fn [entry] [(.getName entry) (io/reader input)])
          (zip-entries input))))
+
+(defn get-gtfs-file [filename]
+  (let [resp @(http/get manifest-url)
+        input (ZipInputStream. (:body resp))]
+    ))

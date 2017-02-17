@@ -133,9 +133,18 @@
      :headers {"Content-type" "application/json"}
      :body (if (string? x) x (json/write-str x))}))
 
+(defn translate-param-key [k]
+  (-> (name k)
+      (str/replace "_" "-")
+      (keyword)))
+
+(def translate-params-xf
+  (map (fn [[k v]] [(translate-param-key k) v])))
+
 (defn api-endpoint [spec f]
   (fn [{:keys [params] :as req}]
-    (let [conformed (s/conform spec params)]
+    (let [params (into {} translate-params-xf params)
+          conformed (s/conform spec params)]
       (if (= conformed ::s/invalid)
           ;; Respond with a user error if the request params do not conform to the
           ;; API specification.
@@ -145,7 +154,8 @@
                                   :request-params params}
                                  :key-fn keyfn)}
 
-          (wrap-json (f (assoc req :conformed conformed)))))))
+          (wrap-json (f (assoc req :conformed conformed
+                               :params params)))))))
 
 (defmacro defapi [name spec params & body]
   `(def ~name (api-endpoint ~spec (fn ~params ~@body))))

@@ -28,12 +28,12 @@
 (s/def ::date-str
   (s/with-gen
     (s/and string? #(re-matches #"\d{4}\d{2}\d{2}" %))
-    (fn []
-      (gen/fmap #(-> % (datetime-for-stamp) (date-str))
-                ;; In the year 3000, we will beam to our destination using our
-                ;; minds, and there will be no MBTA.
-                (let [start (quot (inst-ms #inst "2000") 1000)
-                      end (quot (inst-ms #inst "3000") 1000)]
+    (let [start (quot (inst-ms #inst "2000") 1000)
+          end (quot (inst-ms #inst "3000") 1000)]
+      (fn []
+        (gen/fmap #(-> % (datetime-for-stamp) (date-str))
+                  ;; In the year 3000, we will beam to our destination using our
+                  ;; minds, and there will be no MBTA.
                   (gen/large-integer* {:min start
                                        :max end}))))))
 
@@ -55,6 +55,10 @@
 (s/def ::scheduled-stop
   (s/keys :req-un [::stop-id ::stop-sequence ::scheduled-arrival
                    ::scheduled-departure ::trip-id ::trip-start]))
+
+;; TODO: Shared trip-id, ordered stop-sequences, etc.
+(s/def ::scheduled-stops
+  (s/coll-of ::scheduled-stop))
 
 
 ;; TODO Create a generator that generates stops in order

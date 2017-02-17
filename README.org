@@ -29,6 +29,10 @@
         [[http://realtime.mbta.com/Portal/Home/Documents][Realtime API]].
    - TRIP_UPDATES_URL :: Specify a URL to poll for Trip Updates
    - GTFS_ZONE :: A valid time zone ID (default: America/New_York)
+   - POSTPROCESS_INTERVAL :: For the moment, the system performs necessary
+        post-processing on the trip-stops collection in order to make certain
+        performance queries respond quickly. Set this variable to the number of
+        seconds between post-processing runs.
 
    You can also set these as Java system properties on start up. The system
    properties are the same as the environment variales, except downcased and

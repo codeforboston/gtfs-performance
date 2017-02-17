@@ -10,6 +10,7 @@
             [taoensso.timbre.appenders.3rd-party.rotor :refer [rotor-appender]])
   (:gen-class))
 
+
 ;; Standard logging configuration.
 (timbre/merge-config!
  {:appenders {:rotor (assoc (rotor-appender

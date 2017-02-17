@@ -94,30 +94,34 @@
 
 ;; Function definitions:
 (defn stop-times
-  [db trip-id trip-start]
-  (let [ref-date (datetime-for-str trip-start)
-        xf (map (fn [{at :arrival-time, dt :departure-time,
-                      ss :stop-sequence, :as stop-time}]
-                  [($/->int ss)
-                   (-> (dissoc stop-time :_id)
-                       (assoc :stop-sequence ($/->int ss)
-                              :scheduled-arrival (->stamp (offset-time ref-date at))
-                              :scheduled-departure (->stamp (offset-time ref-date dt))
-                              :scheduled? true
-                              :trip-id trip-id
-                              :trip-start trip-start))]))]
-    (into (sorted-map) xf (db/stop-times-for-trip db trip-id))))
+  ([db trip-id trip-start]
+   (let [ref-date (datetime-for-str trip-start)
+         xf (map (fn [{at :arrival-time, dt :departure-time,
+                       ss :stop-sequence, :as stop-time}]
+                   [($/->int ss)
+                    (-> (dissoc stop-time :_id)
+                        (assoc :stop-sequence ($/->int ss)
+                               :scheduled-arrival (->stamp (offset-time ref-date at))
+                               :scheduled-departure (->stamp (offset-time ref-date dt))
+                               :scheduled? true
+                               :trip-id trip-id
+                               :trip-start trip-start))]))]
+     (into (sorted-map) xf (db/stop-times-for-trip db trip-id))))
+  ([db [trip-id trip-start]]
+   (stop-times db trip-id trip-start)))
 
 (defn scheduled-arrivals
   "Returns a map of scheduled stop arrival times, indexed by the stop sequence.
   This calculates the arrival times of the trip regardless of whether the trip
   is actually scheduled to run/did run on the given date."
-  [db trip-id trip-start]
-  (into (sorted-map)
-        (let [ref-date (datetime-for-str trip-start)]
-          (map (fn [{at :arrival-time, ss :stop-sequence}]
-                 [ss (->stamp (offset-time ref-date at))])))
-        (db/stop-times-for-trip db trip-id)))
+  ([db trip-id trip-start]
+   (into (sorted-map)
+         (let [ref-date (datetime-for-str trip-start)]
+           (map (fn [{at :arrival-time, ss :stop-sequence}]
+                  [ss (->stamp (offset-time ref-date at))])))
+         (db/stop-times-for-trip db trip-id)))
+  ([db [trip-id trip-start]]
+   (scheduled-arrivals db trip-id trip-start)))
 
 (defn add-stop-delay
   [scheduled stop]
@@ -241,6 +245,7 @@
                         (index-by :stop-sequence))]
     (add-estimates (all-stops scheduled trip-stops))))
 
+
 (defn travel-times
   "Uses data stored in the database to calculate the performance of trips
   between two stops in the specified date range. See docs for a detailed
@@ -277,6 +282,7 @@
                       :route-id (:route-id trip)
                       :direction (:direction-id trip)}))))
          (sort-by :dep-dt))))
+
 
 (defn dwell-times
   [db stop-id from-dt to-dt & [{:keys [route-id direction-id]}]]
@@ -378,17 +384,20 @@
   trip updates."
   [db]
   (let [updates-in (chan (sliding-buffer 100) nil
-                 #(error "Encountered an exception in trip update loop:" %))
+                         #(error "Encountered an exception in trip update loop:" %))
         stop (trip-updates->! updates-in)
         updates-mult (async/mult updates-in)
         in (tap updates-mult (chan (sliding-buffer 100)))
         trip-info (trip-info-fn db)]
     (go-loop []
-      (when-let [trip-stop (<! in)]
-        (mc/upsert db "trip-stops"
-                   {:id (:id trip-stop)}
-                   {:$set trip-stop})
-        (recur)))
+      (try
+        (when-let [trip-stop (<! in)]
+          (mc/upsert db "trip-stops"
+                     {:id (:id trip-stop)}
+                     {:$set trip-stop}))
+        (catch Exception exc
+          (error "Error:" exc)))
+      (recur))
     [stop updates-mult]))
 
 
