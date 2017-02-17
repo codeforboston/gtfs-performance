@@ -1,0 +1,63 @@
+{% extends "template/base.djhtml" %}
+
+{% block style %}
+    <style>
+     .stop-done {
+         color: green;
+        }
+    </style>
+{% endblock %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            Trip: {{ trip-id }}
+        </div>
+        <div class="panel-body">
+            Click the stop when the bus arrives to record a timestamp and
+            coordinates.
+        </div>
+    </div>
+    <ul class="list-group">
+        {% for stop in stops %}
+            <a class="list-group-item stop"
+               data-lat="{{ stop.stop-lat }}"
+               data-lng="{{ stop.stop-lon }}"
+               data-seq="{{ stop.stop-sequence }}"
+               href="#"
+            >
+                <h4 class="list-group-item-heading">
+                    {{ stop.stop-name }}
+                </h4>
+                Scheduled arrival: {{ stop.arrival-time }}
+            </a>
+        {% endfor %}
+    </ul>
+
+    Log:
+    <textarea id="log"
+              class="col-xs-12 col-lg-12 col-md-12"
+              rows="5"
+              disabled
+              style="margin-bottom: 2em"></textarea>
+
+    <script type="text/javascript">
+     var geoPermission;
+     navigator.geolocation.getCurrentPosition(function(_) {console.log(_);});
+     $(document).on("click", "a.stop", function(e) {
+         var lat = $(this).data("lat"),
+             lng = $(this).data("lng"),
+             seq = $(this).data("seq"),
+             stamp = Date.now();
+         $(this).append('<span class="glyphicon glyphicon-ok stop-done"/>');
+         navigator.geolocation.getCurrentPosition(function(location) {
+             var geoLat = location.coords.latitude,
+                 geoLng = location.coords.longitude;
+             $("#log").val(function(_i, val) {
+                 return val + [seq, stamp, geoLat, geoLng].join(",") + "\n";
+             });
+         });
+         e.preventDefault();
+     });
+    </script>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "template/base.djhtml" %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-body">
+            Select a trip for route &ldquo;{{ route-id }}&rdquo;
+        </div>
+    </div>
+    <ul class="list-group">
+        {% for trip in trips %}
+            <a class="list-group-item" href="../trip_benchmark/{{ trip.trip-id }}">
+                <h4 class="list-group-item-heading">
+                    To {{ trip.trip-headsign }}
+                </h4>
+                {{ trip.start-time }} to {{ trip.end-time }}
+            </a>
+        {% empty %}
+            <li class="list-group-item disabled">
+                No trips found for that route
+            </li>
+        {% endfor %}
+    </ul>
+{% endblock %}

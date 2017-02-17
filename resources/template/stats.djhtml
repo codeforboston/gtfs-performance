@@ -1,0 +1,49 @@
+{% extends "template/base.djhtml" %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-body">
+            Updates within {{ time-range }}
+        </div>
+    </div>
+    <table class="table">
+        <tr>
+            <th class="col-md-2 col-sm-3 col-xs-4 col-lg-2">Trip Update Count:</th>
+            <td>{{ recent-trip-stops|count }}</td>
+        </tr>
+        <!-- <tr> -->
+        <!-- <th>Unique Trips:</th> -->
+        <!-- <td>{{ unique-trips|join:", " }}</td> -->
+        <!-- </tr> -->
+        <tr>
+            <th>Unique Trip Count:</th>
+            <td>{{ unique-trips|count }}</td>
+        </tr>
+        <tr>
+            <th>Unique Routes:</th>
+            <td>{{ unique-routes|join:", " }}</td>
+        </tr>
+        <tr>
+            <th>Unique Route Count:</th>
+            <td>{{ unique-routes|count }}</td>
+        </tr>
+        <!-- <tr> -->
+        <!-- <th>Unique Stops:</th> -->
+        <!-- <td>{{ unique-stops|join:", " }}</td> -->
+        <!-- </tr> -->
+        <tr>
+            <th>Unique Stop Count:</th>
+            <td>{{ unique-stops|count }}</td>
+        </tr>
+    </table>
+    <ul class="list-group">
+        {% for trip in trips %}
+            <a class="list-group-item" href="../trip_benchmark/{{ trip.trip-id }}">
+                <h4 class="list-group-item-heading">
+                    To {{ trip.trip-headsign }}
+                </h4>
+                {{ trip.start-time }} to {{ trip.end-time }}
+            </a>
+        {% endfor %}
+    </ul>
+{% endblock %}
