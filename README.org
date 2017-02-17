@@ -10,11 +10,14 @@
      archives)
 
 ** Running
-   For interactive development, I recommend using [[http://cider.readthedocs.io/en/latest/][Cider]] or [[https://cursive-ide.com][Cursive]] and jacking
-   in. By default, the REPL starts in the ~mbta-xtras.repl~ namespace. Run
-   ~(system/start)~ to start the application. Run ~(start-mongo)~ to just start
-   Mongo, and ~mbta-xtras.repl/db~ will be bound to the database for
-   convenience. ~(stop-mongo)~ will close the connection.
+*** Interactive Development
+    I recommend using [[http://cider.readthedocs.io/en/latest/][Cider]] or [[https://cursive-ide.com][Cursive]] and jacking in. By default, the REPL
+    starts in the ~mbta-xtras.repl~ namespace. Run ~(system/start)~ to start the
+    application. Run ~(start-mongo)~ to just start Mongo, and
+    ~mbta-xtras.repl/db~ will be bound to the database for convenience.
+    ~(stop-mongo)~ will close the connection.
+*** Noninteractive
+    Use ~lein trampoline run~
    
 ** Environment Variables
    Configuration of the application is done entirely through environment

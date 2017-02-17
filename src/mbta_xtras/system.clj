@@ -49,4 +49,6 @@
 
 (defn -main []
   (start)
-  (.addShutdownHook (Runtime/getRuntime) (Thread. stop)))
+  (.addShutdownHook (Runtime/getRuntime) (Thread. stop))
+  ;; Block the main thread from exiting:
+  (loop [] (Thread/sleep 10000) (recur)))
