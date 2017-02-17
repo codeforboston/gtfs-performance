@@ -2,7 +2,10 @@
   (:require [monger.collection :as mc]
             [monger.core :as mg]
             [monger.operators :refer [$near]]
+
             [com.stuartsierra.component :as component]
+
+            [taoensso.timbre :refer [error info]]
 
             [mbta-xtras.db :as db]
             [mbta-xtras.gtfs :as gtfs]
@@ -11,7 +14,6 @@
 
             [clojure.core.async :as async :refer [<! go-loop]]
             [clojure.string :as str]
-            [taoensso.timbre :refer [error info]]
             [clojure.set :as set]))
 
 
@@ -22,6 +24,7 @@
 (defonce no-service (atom nil))
 ;; Map of dates -> extra service-ids
 (defonce xtra-service (atom nil))
+
 
 (defn make-point [m lat-k lon-k]
   {:type "Point",
@@ -71,12 +74,24 @@
   (let [stop-times (mc/find-maps db "stop-times" {:trip-id trip-id}
                                  {:_id 0, :stop-id 1, :stop-sequence 1, :arrival-time 1,
                                   :departure-time 1})]
-    (if (seq stop-times)
-      stop-times
+    (sequence
+     ($/distinct-with :stop-sequence)
+     (if (seq stop-times)
+       stop-times
 
-      (when-let [api-trip (rt/get-trip trip-id)]
-        (save-api-trip! db api-trip)
-        (:stops api-trip)))))
+       (when-let [api-trip (rt/get-trip trip-id)]
+         (save-api-trip! db api-trip)
+         (:stops api-trip))))))
+
+
+(defn trips-for-route [db route-id]
+  (mc/find-maps db "trips" {:route-id route-id}))
+
+(defn add-stop-info [db xs]
+  (let [stop-ids (into #{} (map :stop-id) xs)
+        stops (->> (mc/find-maps db "stops" {:stop-id {:$in stop-ids}})
+                   ($/index-by :stop-id))]
+    (map #(merge % (stops (:stop-id %))) xs)))
 
 (defn drop-trip-stops! [db]
   (mc/drop db "trip-stops"))
@@ -242,6 +257,10 @@
                      {:_id 0})
        (sort-by :stop-sequence)))
 
+(defn recent-trip-stops [db seconds]
+  (let [since (- (/ (System/currentTimeMillis) 1000) seconds)]
+    (mc/find-maps db "trip-stops" {:arrival-time {:$gte since}})))
+
 (defn travel-times [db from-stop]
   (mc/find-maps db "stop-times" {:stop-id from-stop} {:_id 0,
                                                       :trip-id 1
@@ -262,6 +281,16 @@
             @calendar)
       (set/difference (set (get @no-service ($/date-str dt))))
       (set/union (set (get @xtra-service ($/date-str dt))))))
+
+
+(defn filter-running-at
+  "Returns a transducer that filters on trips running at the given datetime."
+  [dt]
+  (filter (services-at dt)))
+
+(defn filter-running-now []
+  (filter (services-at (java.time.LocalDateTime/now))))
+
 
 ;; The start and stop times are not stored in trips!
 (defn scheduled-trips-at

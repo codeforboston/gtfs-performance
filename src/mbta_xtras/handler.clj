@@ -3,6 +3,7 @@
             [compojure.core :refer [context defroutes GET POST]]
             [ring.middleware.keyword-params :refer [wrap-keyword-params]]
             [ring.middleware.params :refer [wrap-params]]
+            [selmer.parser :refer [render-file]]
 
             [mbta-xtras.api-spec :as api :refer [defapi keyfn]]
             [mbta-xtras.db :as db]
@@ -77,12 +78,41 @@
              ::api/stamp ($/datetime-for-stamp (Integer/parseInt at)))]
     (db/scheduled-trips-at db dt)))
 
+(defn select-route-trip [{{:keys [route-id]} :params, db :db}]
+  (let [trips (db/trips-for-route db route-id)
+        directions ($/index-by :direction trips)]
+    (render-file "template/select_trip.djhtml" {:trips trips
+                                                :route-id route-id})))
+
+(defn benchmark [{{:keys [trip-id]} :params, db :db}]
+  (let [stop-times (->> (db/stop-times-for-trip db trip-id)
+                        (db/add-stop-info db)
+                        (sort-by :stop-sequence ))]
+    (render-file "template/benchmark.djhtml" {:stops stop-times
+                                              :trip-id trip-id})))
+
+(defn stats [{:keys [db]}]
+  (let [recent-stops (db/recent-trip-stops db 3600)
+        trip-ids (into #{} (map :trip-id) recent-stops)
+        route-ids (into #{} (map :route-id) recent-stops)
+        stop-ids (into #{} (map :stop-id) recent-stops)]
+    (render-file "template/stats.djhtml"
+                 {:time-range "the last hour"
+                  :recent-trip-stops recent-stops
+                  :unique-trips trip-ids
+                  :unique-routes (sort route-ids)
+                  :unique-stops stop-ids})))
+
 (defroutes handler
   (GET "/find_stops" []  find-stops)
   (GET "/trips_for_stop" [] trips-for-stop)
   (GET "/trip_performance" []  trip-performance)
   (GET "/services" [] services-at)
   (GET "/trips_at" [] trips-at)
+  ;; Helper for recording stop times:
+  (GET "/select_trip/:route-id" req select-route-trip)
+  (GET "/trip_benchmark/:trip-id" req benchmark)
+  (GET "/stats" req stats)
 
   ;; MBTA Performance API:
   (GET "/dwells" [] dwells)
@@ -95,6 +125,10 @@
       (wrap-keyword-params)
       (wrap-params)))
 
-(defn make-app [conn db]
+(defn make-app
+  "Runs when the Web component is started. Works as a middleware wrapper by
+  associating a mongo connection and database to each request before passing the
+  request to handlers."
+  [conn db]
   (fn [req]
     (app (assoc req :mongo conn, :db db))))

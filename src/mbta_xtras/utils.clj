@@ -154,7 +154,9 @@
   ([k]
    (map (juxt k identity))))
 
-(defn distinct-with [k]
+(defn distinct-with
+  "Returns a transducer function that removes non-distinct values of (k x)."
+  [k]
   (fn [rf]
     (let [seen (volatile! #{})]
       (fn

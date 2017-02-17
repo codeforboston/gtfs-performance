@@ -15,10 +15,11 @@
                  [aleph "0.4.2-alpha8"]
 
                  [com.google.protobuf/protobuf-java "2.6.1"]
-                 [org.clojure/core.async "0.2.391"]
+                 [org.clojure/core.async "0.2.395"]
                  [org.clojure/test.check "0.9.0"]
 
-                 [com.taoensso/timbre "4.8.0-alpha1"]]
+                 [com.taoensso/timbre "4.8.0-alpha1"]
+                 [selmer "1.10.5"]]
   :java-source-paths ["src/java"]
   :main mbta-xtras.system
   :repl-options {:init-ns mbta-xtras.repl,
