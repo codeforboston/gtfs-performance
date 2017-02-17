@@ -46,4 +46,6 @@
 (defn stop []
   (alter-var-root #'system component/stop-system))
 
-(defn -main [] (start))
+(defn -main []
+  (start)
+  (.addShutdownHook (Runtime/getRuntime) (Thread. stop)))

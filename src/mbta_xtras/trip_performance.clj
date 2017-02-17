@@ -93,11 +93,6 @@
 
 
 ;; Function definitions:
-(defn prep-collection [db mongo-coll]
-  (mc/ensure-index db mongo-coll
-                   (array-map :stop-id 1, :arrival-time 1))
-  (mc/ensure-index db mongo-coll (array-map :id 1) {:unique true}))
-
 (defn stop-times
   [db trip-id trip-start]
   (let [ref-date (datetime-for-str trip-start)
@@ -129,7 +124,7 @@
   (when-let [sched (scheduled (:stop-sequence stop))]
     (merge
      (dissoc stop :_id)
-     (when-let [{at :arrival-time} stop]
+     (when-let [at (:arrival-time stop)]
        {:delay (- at sched)})
      {:scheduled-arrival sched})))
 
@@ -175,10 +170,12 @@
                           sch-duration (- (:scheduled-arrival next-obs)
                                           (:scheduled-arrival last-obs))]
                       (map (fn [scheduled-stop]
-                             (let [delay (* (/ (- (:scheduled-arrival scheduled-stop)
-                                                  (:scheduled-arrival last-obs))
-                                               sch-duration)
-                                            obs-duration)]
+                             (let [delay (if (zero? sch-duration)
+                                           0
+                                           (* (/ (- (:scheduled-arrival scheduled-stop)
+                                                    (:scheduled-arrival last-obs))
+                                                 sch-duration)
+                                              obs-duration))]
                                (assoc scheduled-stop
                                       :id (str (:trip-id scheduled-stop) "-"
                                                (:trip-start scheduled-stop) "-"
@@ -201,9 +198,11 @@
                           sch-duration (- (:scheduled-arrival next-obs) sch-start)]
                       (map (fn [{:keys [scheduled-arrival scheduled-departure]
                                  :as scheduled-stop}]
-                             (let [stop-delay (* (/ (- scheduled-arrival sch-start)
-                                                    sch-duration)
-                                                 obs-delay)]
+                             (let [stop-delay (if (zero? sch-duration)
+                                                0
+                                                (* (/ (- scheduled-arrival sch-start)
+                                                      sch-duration)
+                                                   obs-delay))]
 
                                (assoc scheduled-stop
                                       :arrival-time (long (+ scheduled-arrival stop-delay))
@@ -261,23 +260,23 @@
                                                {:direction-id 1, :route-id 1,
                                                 :trip-id 1}))]
 
-    ;; For now, let's assume that all trip stops have gone through
-    ;; post-processing and have :scheduled-arrival, etc.
-    (keep (fn [from-stop]
-            (when-let [to-stop (trip-ends [(:trip-id from-stop)
-                                           (:trip-start from-stop)])]
-              (let [bench (- (:scheduled-arrival to-stop)
-                             (:scheduled-departure from-stop))
-                    trip (trips (:trip-id from-stop))]
-                {:dep-dt (str (:departure-time from-stop))
-                 :arr-dt (str (:arrival-time to-stop))
-                 :travel-time-sec (- (:arrival-time to-stop) (:departure-time
-                                                              from-stop))
-                 :estimated (or (:estimated? from-stop) (:estimated? to-stop))
-                 :benchmark-travel-time-sec bench
-                 :route-id (:route-id trip)
-                 :direction (:direction-id trip)})))
-          from-stops)))
+    (->> from-stops
+         (keep (fn [from-stop]
+                 (when-let [to-stop (trip-ends [(:trip-id from-stop)
+                                                (:trip-start from-stop)])]
+                   (let [bench (- (:scheduled-arrival to-stop)
+                                  ;; TODO: Use departure:
+                                  (:scheduled-arrival from-stop))
+                         trip (trips (:trip-id from-stop))]
+                     {:dep-dt (str (:departure-time from-stop))
+                      :arr-dt (str (:arrival-time to-stop))
+                      :travel-time-sec (- (:arrival-time to-stop) (:departure-time
+                                                                   from-stop))
+                      :estimated (or (:estimated? from-stop) (:estimated? to-stop))
+                      :benchmark-travel-time-sec bench
+                      :route-id (:route-id trip)
+                      :direction (:direction-id trip)}))))
+         (sort-by :dep-dt))))
 
 (defn dwell-times
   [db stop-id from-dt to-dt & [{:keys [route-id direction-id]}]]
@@ -378,7 +377,6 @@
   and insertion when closed or given a value and a mult that can be tapped for
   trip updates."
   [db]
-  (prep-collection db "trip-stops")
   (let [updates-in (chan (sliding-buffer 100) nil
                  #(error "Encountered an exception in trip update loop:" %))
         stop (trip-updates->! updates-in)

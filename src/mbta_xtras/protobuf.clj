@@ -7,25 +7,43 @@
             [clojure.string :as str])
 
   (:import [com.google.transit.realtime GtfsRealtime$FeedMessage
-            GtfsRealtime$TripUpdate$StopTimeUpdate]
+            GtfsRealtime$TripUpdate$StopTimeUpdate
+            GtfsRealtime$VehiclePosition]
            [com.google.protobuf InvalidProtocolBufferException]))
 
 
 (def trip-updates-url
-  (env :trip-updates-url "http://developer.mbta.com/lib/GTRTFS/Alerts/TripUpdates.pb"))
+  (env :trip-updates-url
+       "http://developer.mbta.com/lib/GTRTFS/Alerts/TripUpdates.pb"))
+
+(def vehicle-positions-url
+  (env :vehicle-positions-url
+       "http://developer.mbta.com/lib/GTRTFS/Alerts/VehiclePositions.pb"))
 
 (defn ^GtfsRealtime$FeedMessage get-feed [url]
-  (GtfsRealtime$FeedMessage/parseFrom (io/input-stream url)))
+  (try
+    (GtfsRealtime$FeedMessage/parseFrom (io/input-stream url))
+    ;; Ignore errors; we'll assume for now that they're
+    ;; due to transient network issues, quotas, or (I
+    ;; suspect) non-atomic writing to the protobuf on
+    ;; the part of the MBTA.
+    (catch InvalidProtocolBufferException ipb-ex
+      ;; Don't print the whole stacktrace and unfinished
+      ;; message, since it's really spammy.
+      (error (.getMessage ipb-ex)))
+    (catch Exception ex
+      (error ex "encountered while fetching trip updates"))))
 
+(defn timestamp [u]
+  (.. u getHeader getTimestamp))
+
+;; Trip Updates:
 (defn get-trip-updates
   "Retrieve the latest TripUpdates from the specified URL, or from the default.
   Note that since this is designed with the MBTA's GTFS-RT feed in mind, the
   update types (trip, vehicle, alert) are delivered on separate feed."
   [& [url]]
   (get-feed (or url trip-updates-url)))
-
-(defn timestamp [u]
-  (.. u getHeader getTimestamp))
 
 (defn stop-updates-before [trip-update stamp]
   (take-while #(< (.getTime (.getArrival  %)) stamp)
@@ -74,7 +92,7 @@
                            {:arrival-time (long (.. stop-update getArrival getTime))
                             :departure-time (long (.. stop-update getDeparture getTime))}
 
-                           {:schedule-relationship (str rel)}))))
+                           {:schedule-relationship (name rel)}))))
                     (.getStopTimeUpdateList tu)))))))
 
 (defn trip-updates->!
@@ -85,18 +103,8 @@
          :or {interval 30000}}]
   (let [stop (chan)]
     (go-loop [last-stamp 0]
-      (if-let [updates (try (get-trip-updates)
-                            ;; Ignore errors; we'll assume for now that they're
-                            ;; due to transient network issues, quotas, or (I
-                            ;; suspect) non-atomic writing to the protobuf on
-                            ;; the part of the MBTA.
-                            (catch InvalidProtocolBufferException ipb-ex
-                              ;; Don't print the whole stacktrace and unfinished
-                              ;; message, since it's really spammy.
-                              (error (.getMessage ipb-ex)))
-                            (catch Exception ex
-                              (error ex "encountered while fetching trip updates")))]
-        (let [stamp (.. updates getHeader getTimestamp)]
+      (if-let [updates (get-trip-updates)]
+        (let [stamp (timestamp updates)]
           (when (> stamp last-stamp)
             (doseq [update (->> (trip-updates updates)
                                 (filter #(> (.getTimestamp %) last-stamp))
@@ -105,7 +113,44 @@
 
           (alt!
             (timeout interval) (recur stamp)
-            stop nil))
+            stop (info "Stopping trip updates loop")))
 
-        (recur last-stamp)))
+        (do
+          (<! (timeout interval))
+          (recur last-stamp))))
     stop))
+
+
+;; Vehicle Positions
+(defn get-vehicle-positions
+  [& [url]]
+  (some->> (get-feed (or url vehicle-positions-url))
+           (.getEntityList)
+           (keep (memfn getVehicle))))
+
+(defn vehicle-map [^GtfsRealtime$VehiclePosition vehicle]
+  {:lat (.. vehicle getPosition getLatitude)
+   :lng (.. vehicle getPosition getLongitude)
+   :bearing (.. vehicle getPosition getBearing)
+   :stop-sequence (. vehicle getCurrentStopSequence)
+   :timestamp (. vehicle getTimestamp)
+   :trip-id (.. vehicle getTrip getTripId)
+   :trip-start (.. vehicle getTrip getStartDate)
+   :vehicle-id (.. vehicle getVehicle getId)})
+
+(defn vehicle-updates->
+  [to]
+  (let [stop (chan)]
+    (go-loop []
+      (when-let [updates (get-vehicle-positions)]
+        (doseq [position (map vehicle-map updates)]
+          (>! to position)))
+      (alt! (timeout 30000) (recur)
+            stop (info "Stopping vehicle updates loop")))
+    stop))
+
+;; (map #(.getCurrentStopSequence %) (take 10 *positions))
+
+;; (map vehicle-map (take 3 *positions))
+
+;; (def *positions (get-vehicle-positions))
