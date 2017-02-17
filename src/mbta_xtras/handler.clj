@@ -1,6 +1,7 @@
 (ns mbta-xtras.handler
   (:require [clojure.data.json :as json]
             [compojure.core :refer [context defroutes GET POST]]
+            [compojure.route :as route]
             [ring.middleware.keyword-params :refer [wrap-keyword-params]]
             [ring.middleware.params :refer [wrap-params]]
             [selmer.parser :refer [render-file]]
@@ -118,7 +119,8 @@
   (GET "/dwells" [] dwells)
   (GET "/headways" [] headways)
   (GET "/traveltimes" [] travel-times)
-  (GET "/trip_updates" [] trip-updates))
+  (GET "/trip_updates" [] trip-updates)
+  (route/not-found "I couldn't find what you were looking for."))
 
 (def app
   (-> #'handler
