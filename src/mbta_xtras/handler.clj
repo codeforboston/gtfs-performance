@@ -104,6 +104,16 @@
                   :unique-routes (sort route-ids)
                   :unique-stops stop-ids})))
 
+(defn route-stats [{:keys [db], {route-id :route-id} :params}]
+  (let [recent-stops (db/recent-trip-stops db 3600 {:route-id route-id})
+        trip-stops (group-by :trip-id recent-stops)]
+    (render-file "template/route_stats.djhtml"
+                 {:time-range "the last hour"
+                  :all-stops recent-stops
+                  :trip-ids (keys trip-stops)
+                  :trip-stops (seq trip-stops)
+                  :route-id route-id})))
+
 (defroutes handler
   (GET "/find_stops" []  find-stops)
   (GET "/trips_for_stop" [] trips-for-stop)
@@ -114,6 +124,7 @@
   (GET "/select_trip/:route-id" req select-route-trip)
   (GET "/trip_benchmark/:trip-id" req benchmark)
   (GET "/stats" req stats)
+  (GET "/stats/:route-id" req route-stats)
 
   ;; MBTA Performance API:
   (GET "/dwells" [] dwells)
