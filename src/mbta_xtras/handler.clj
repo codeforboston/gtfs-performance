@@ -114,6 +114,30 @@
                   :trip-stops (seq trip-stops)
                   :route-id route-id})))
 
+(defn make-recents [stops]
+  (->> stops
+       (sort-by :arrival-time #(compare %2 %1))
+       (map (fn [s] (update s :arrival-time #(java.util.Date. (* 1000 %)))))))
+
+(defn recent-list [{db :db}]
+  (let [recent-stops (make-recents (db/recent-trip-stops db 3600))]
+    (render-file "template/recent.djhtml"
+                 {:time-range "the last hour"
+                  :all-stops recent-stops})))
+
+(defn recent-processed-list [{db :db}]
+  (let [recent-stops (->> (db/recent-processed-trip-stops db 1200)
+                          (db/add-stop-info db)
+                          (make-recents)
+                          (group-by :trip-id))
+        trip-groups (into {} (map (fn [[trip-id [stop :as stops]]]
+                                    [trip-id {:stops (sort-by :stop-sequence
+                                                              stops)
+                                              :route-id (:route-id stop)}]))
+                          recent-stops)]
+    (render-file "template/recent_processed.djhtml" {:time-range "the last hour"
+                                                     :trip-groups trip-groups})))
+
 (defroutes handler
   (GET "/find_stops" []  find-stops)
   (GET "/trips_for_stop" [] trips-for-stop)
@@ -125,6 +149,8 @@
   (GET "/trip_benchmark/:trip-id" req benchmark)
   (GET "/stats" req stats)
   (GET "/stats/:route-id" req route-stats)
+  (GET "/recent/stops" req recent-list)
+  (GET "/recent/processed" req recent-processed-list)
 
   ;; MBTA Performance API:
   (GET "/dwells" [] dwells)

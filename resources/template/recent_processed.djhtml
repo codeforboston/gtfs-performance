@@ -1,0 +1,53 @@
+{% extends "template/base.djhtml" %}
+
+{% block style %}
+    <style>
+     .late { color: red; }
+     .early { color: green; }
+    </style>
+{% endblock %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-body">
+            Processed Updates within {{ time-range }}
+        </div>
+    </div>
+
+    <table class="table">
+        <tbody>
+        {% for trip-id, trip in trip-groups %}
+            <tr>
+                <th>{{ trip-id }} (Route {{ stop.route-id }})</th>
+                <td>
+                    <table class="table">
+                        {% for stop in trip.stops %}
+                        <tr>
+                            <td>
+                                #{{stop.stop-sequence}}. {{ stop.stop-name }}
+                            </td>
+                            <td>{{ stop.scheduled-arrival }}</td>
+                            <td>{{ stop.arrival-time|date:"HH:mm:ss" }}</td>
+                            <td>
+                                {% if stop.estimated? %}
+                                    (estimated)
+                                {% endif %}
+                            </td>
+                            {% if stop.delay > 0 %}
+                                <td class="late">
+                                    +{{ stop.delay }}s
+                                </td>
+                            {% else %}
+                                <td class="early">
+                                    {{ stop.delay }}s
+                                </td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </table>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

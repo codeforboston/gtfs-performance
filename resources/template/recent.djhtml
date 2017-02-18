@@ -1,0 +1,32 @@
+{% extends "template/base.djhtml" %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-body">
+            Updates within {{ time-range }}
+        </div>
+    </div>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <td>Route</td>
+                <td>Trip</td>
+                <td>#</td>
+                <td>Stop</td>
+                <td>Timestamp</td>
+            </tr>
+        </thead>
+        <tbody>
+        {% for trip-stop in all-stops %}
+            <tr>
+                <td>{{ trip-stop.route-id }}</td>
+                <td>{{ trip-stop.trip-id }}</td>
+                <td>{{ trip-stop.stop-sequence }}</td>
+                <td>{{ trip-stop.stop-id }}</td>
+                <td>{{ trip-stop.arrival-time|date:"HH:mm:ss" }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

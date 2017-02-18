@@ -279,12 +279,20 @@
                      {:_id 0})
        (sort-by :stop-sequence)))
 
+(defn since-query [seconds]
+  (let [now (/ (System/currentTimeMillis) 1000)
+        since (- now seconds)]
+    {:arrival-time {:$gte since, :$lte now}}))
+
 (defn recent-trip-stops
   ([db seconds ref]
-   (let [since (- (/ (System/currentTimeMillis) 1000) seconds)]
-     (mc/find-maps db "trip-stops" (merge {:arrival-time {:$gte since}} ref))))
+   (mc/find-maps db "trip-stops" (merge (since-query seconds) ref)))
   ([db seconds]
    (recent-trip-stops db seconds nil)))
+
+(defn recent-processed-trip-stops
+  [db seconds]
+  (mc/find-maps db "processed-trip-stops" (since-query seconds)))
 
 (defn travel-times [db from-stop]
   (mc/find-maps db "stop-times" {:stop-id from-stop} {:_id 0,

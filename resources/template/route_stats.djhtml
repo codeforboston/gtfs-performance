@@ -1,0 +1,37 @@
+{% extends "template/base.djhtml" %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-body">
+            Updates to <strong>Route {{ route-id }}</strong> within {{ time-range }}
+        </div>
+    </div>
+    <table class="table">
+        <tr>
+            <th class="col-md-2 col-sm-3 col-xs-4 col-lg-2">Trip Update Count:</th>
+            <td>{{ all-stops|count }}</td>
+        </tr>
+        <tr>
+            <th>Unique Trip Count:</th>
+            <td>{{ trip-ids|count }}</td>
+        </tr>
+        <tr>
+            <th>Trip Stops</th>
+            <td>
+                <ul class="list-group">
+                    {% for trip-id, trip-stop-updates in trip-stops %}
+                        <li class="list-group-item">
+                            <h5 class="list-group-item-heading">
+
+                                {{ trip-id }}: {{ trip-stop-updates|count }} update{{ trip-stop-updates|count|pluralize }}
+                            </h5>
+                            {% for stop in trip-stop-updates %}
+                                {{ stop.stop-sequence }}
+                            {% endfor %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </td>
+        </tr>
+    </table>
+{% endblock %}
