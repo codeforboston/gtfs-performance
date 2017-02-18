@@ -226,15 +226,15 @@
     (go-loop []
       ;; The updates channel receives a non-nil message each time the feed is
       ;; updated or when the application starts.
-      (when-let [info (<! updates)]
-        (when (not= (:feed-version (slurp-run-info))
-                    (:feed-version info))
-          (do-update! db)
-          (spit "resources/run_info.clj" (pr-str info)))
-        (recur))
+      (if-let [info (<! updates)]
+        (do (when (not= (:feed-version (slurp-run-info))
+                        (:feed-version info))
+              (do-update! db)
+              (spit "resources/run_info.clj" (pr-str info)))
+            (recur))
 
-      ;; Exiting the update loop.
-      (spit-atoms))
+        ;; Exiting the update loop.
+        (spit-atoms)))
     updates))
 
 
