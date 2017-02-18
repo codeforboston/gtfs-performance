@@ -147,6 +147,7 @@
   ;; Helper for recording stop times:
   (GET "/select_trip/:route-id" req select-route-trip)
   (GET "/trip_benchmark/:trip-id" req benchmark)
+  ;; Viewing recently ingested and processed data:
   (GET "/stats" req stats)
   (GET "/stats/:route-id" req route-stats)
   (GET "/recent/stops" req recent-list)
@@ -157,6 +158,7 @@
   (GET "/headways" [] headways)
   (GET "/traveltimes" [] travel-times)
   (GET "/trip_updates" [] trip-updates)
+  (GET "/" req stats)
   (route/not-found "I couldn't find what you were looking for."))
 
 (def app

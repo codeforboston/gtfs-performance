@@ -1,5 +1,11 @@
 {% extends "template/base.djhtml" %}
 
+{% block style %}
+    <style>
+     a.route {}
+    </style>
+{% endblock %}
+
 {% block body %}
     <div class="panel panel-info">
         <div class="panel-body">
@@ -11,26 +17,21 @@
             <th class="col-md-2 col-sm-3 col-xs-4 col-lg-2">Trip Update Count:</th>
             <td>{{ recent-trip-stops|count }}</td>
         </tr>
-        <!-- <tr> -->
-        <!-- <th>Unique Trips:</th> -->
-        <!-- <td>{{ unique-trips|join:", " }}</td> -->
-        <!-- </tr> -->
         <tr>
             <th>Unique Trip Count:</th>
             <td>{{ unique-trips|count }}</td>
         </tr>
         <tr>
             <th>Unique Routes:</th>
-            <td>{{ unique-routes|join:", " }}</td>
+            <td>
+                {% for route-id in unique-routes %}
+                    <a class="route" href="stats/{{ route-id }}">{{ route-id }}</a>
+                {% endfor %}
         </tr>
         <tr>
             <th>Unique Route Count:</th>
             <td>{{ unique-routes|count }}</td>
         </tr>
-        <!-- <tr> -->
-        <!-- <th>Unique Stops:</th> -->
-        <!-- <td>{{ unique-stops|join:", " }}</td> -->
-        <!-- </tr> -->
         <tr>
             <th>Unique Stop Count:</th>
             <td>{{ unique-stops|count }}</td>
