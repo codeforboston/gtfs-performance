@@ -1,0 +1,19 @@
+{% extends "template/base.djhtml" %}
+
+{% block body %}
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            Trip: {{ trip-id }}
+        </div>
+        <div class="panel-body">
+            Records for the following dates:
+        </div>
+    </div>
+    <ul class="list-group">
+        {% for start-date in start-dates %}
+            <a class="list-group-item" href="/trip/{{ trip-id }}/{{ start-date }}">
+                Start Date: {{ start-date }}
+            </a>
+        {% endfor %}
+    </ul>
+{% endblock %}

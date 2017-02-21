@@ -138,6 +138,27 @@
     (render-file "template/recent_processed.djhtml" {:time-range "the last hour"
                                                      :trip-groups trip-groups})))
 
+(defn processed-trip-stats [{db :db, {:keys [trip-id trip-start]} :params}]
+  (let [stops (->> (db/processed-trip-updates db trip-id trip-start)
+                   (db/add-stop-info db))]
+    (render-file "template/processed_trip_stats.djhtml" {:trip-id trip-id
+                                                         :trip-start trip-start
+                                                         :stops stops})))
+
+(defn view-trip-dates [{db :db, {:keys [trip-id]} :params}]
+  (let [start-dates (db/trip-start-dates db trip-id)]
+    (render-file "template/dates_for_trip.djhtml"
+                 {:start-dates start-dates
+                  :trip-id trip-id})))
+
+(defn view-trip-stops [{db :db {:keys [trip-id trip-start]} :params}]
+  (let [stops (->> (db/trip-updates db trip-id trip-start)
+                   (db/add-stop-info db))]
+    (render-file "template/trip_updates.djhtml"
+                 {:trip-id trip-id
+                  :trip-start trip-start
+                  :stops stops})))
+
 (defroutes handler
   (GET "/find_stops" []  find-stops)
   (GET "/trips_for_stop" [] trips-for-stop)
@@ -150,8 +171,11 @@
   ;; Viewing recently ingested and processed data:
   (GET "/stats" req stats)
   (GET "/stats/:route-id" req route-stats)
-  (GET "/recent/stops" req recent-list)
-  (GET "/recent/processed" req recent-processed-list)
+  (GET "/stops/recent" req recent-list)
+  (GET "/trip/:trip-id" req view-trip-dates)
+  (GET "/trip/:trip-id/:trip-start" req view-trip-stops)
+  (GET "/processed/recent" req recent-processed-list)
+  (GET "/processed/:trip-id/:trip-start" req processed-trip-stats)
 
   ;; MBTA Performance API:
   (GET "/dwells" [] dwells)
