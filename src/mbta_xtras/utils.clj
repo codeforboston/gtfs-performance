@@ -1,8 +1,10 @@
 (ns mbta-xtras.utils
   (:require [clojure.spec :as s]
             [clojure.string :as str]
-            [environ.core :refer [env]])
-  (:import [java.time DayOfWeek LocalDate LocalDateTime LocalTime Instant ZonedDateTime ZoneId]
+            [environ.core :refer [env]]
+            [selmer.filters :refer [add-filter!]])
+  (:import [java.time DayOfWeek LocalDate LocalDateTime
+            LocalTime Instant ZonedDateTime ZoneId]
            [java.time.format DateTimeFormatter]
            [java.time.temporal ChronoUnit]))
 
@@ -172,3 +174,5 @@
 (defn ->int [x]
   (cond (string? x) (Integer/parseInt x)
         (integer? x) x))
+
+(add-filter! :abs #(Math/abs %))

@@ -273,11 +273,20 @@
 (defn find-trips-for-stop [db stop-id]
   (mc/distinct db "stop-times" :trip-id {:stop-id stop-id}))
 
-(defn trip-updates [db trip-id trip-start]
-  (->> (mc/find-maps db "trip-stops" {:trip-id trip-id
+(defn get-updates [db coll trip-id trip-start]
+  (->> (mc/find-maps db coll {:trip-id trip-id
                                       :trip-start trip-start}
                      {:_id 0})
        (sort-by :stop-sequence)))
+
+(defn trip-updates [db trip-id trip-start]
+  (get-updates db "trip-stops" trip-id trip-start))
+
+(defn processed-trip-updates [db trip-id trip-start]
+  (get-updates db "processed-trip-stops" trip-id trip-start))
+
+(defn trip-start-dates [db trip-id]
+  (mc/distinct db "trip-stops" :trip-start {:trip-id trip-id}))
 
 (defn since-query [seconds]
   (let [now (/ (System/currentTimeMillis) 1000)
