@@ -176,3 +176,11 @@
         (integer? x) x))
 
 (add-filter! :abs #(Math/abs %))
+
+(defn datefmt [x pattern]
+  (if (number? x)
+    (datefmt (datetime-for-stamp x) pattern)
+
+    (.format (DateTimeFormatter/ofPattern pattern) x)))
+
+(add-filter! :datefmt datefmt)

@@ -21,7 +21,7 @@
                     #{{stop.stop-sequence}}. {{ stop.stop-name }}
                 </td>
                 <td>{{ stop.scheduled-arrival }}</td>
-                <td>{{ stop.arrival-time|date:"HH:mm:ss" }}</td>
+                <td>{{ stop.arrival-time|datefmt:"hh:MM:ss a" }}</td>
                 <td>
                     {% if stop.estimated? %}
                         (estimated)

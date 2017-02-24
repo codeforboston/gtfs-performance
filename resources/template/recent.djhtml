@@ -14,7 +14,7 @@
                 <td>Trip</td>
                 <td>#</td>
                 <td>Stop</td>
-                <td>Timestamp</td>
+                <td>Arrival Time</td>
             </tr>
         </thead>
         <tbody>
@@ -24,7 +24,7 @@
                 <td>{{ trip-stop.trip-id }}</td>
                 <td>{{ trip-stop.stop-sequence }}</td>
                 <td>{{ trip-stop.stop-id }}</td>
-                <td>{{ trip-stop.arrival-time|date:"HH:mm:ss" }}</td>
+                <td>{{ trip-stop.arrival-time|datefmt:"hh:MM:ss a" }}</td>
             </tr>
         {% endfor %}
         </tbody>

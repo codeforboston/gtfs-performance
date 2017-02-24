@@ -10,7 +10,6 @@
         <thead>
             <tr>
                 <td>Route</td>
-                <td>Trip</td>
                 <td>#</td>
                 <td>Stop</td>
                 <td>Timestamp</td>
@@ -20,10 +19,9 @@
         {% for trip-stop in stops %}
             <tr>
                 <td>{{ trip-stop.route-id }}</td>
-                <td>{{ trip-stop.trip-id }}</td>
                 <td>{{ trip-stop.stop-sequence }}</td>
-                <td>{{ trip-stop.stop-id }}</td>
-                <td>{{ trip-stop.arrival-time|date:"HH:mm:ss" }}</td>
+                <td>{{ trip-stop.stop-name }} ({{trip-stop.stop-id}})</td>
+                <td>{{ trip-stop.arrival-time|datefmt:"hh:mm:ss a" }}</td>
             </tr>
         {% endfor %}
         </tbody>
