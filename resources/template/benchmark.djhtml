@@ -27,8 +27,10 @@
                href="#"
             >
                 <h4 class="list-group-item-heading">
-                    {{ stop.stop-name }}
+                    {{ stop.stop-name }} (#{{ stop.stop-sequence }})
                 </h4>
+                ID: {{ stop.stop-id }}
+                <br>
                 Scheduled arrival: {{ stop.arrival-time }}
             </a>
         {% endfor %}
