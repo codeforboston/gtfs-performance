@@ -120,7 +120,6 @@
           (recur last-stamp))))
     stop))
 
-
 ;; Vehicle Positions
 (defn get-vehicle-positions
   [& [url]]
@@ -149,8 +148,3 @@
             stop (info "Stopping vehicle updates loop")))
     stop))
 
-;; (map #(.getCurrentStopSequence %) (take 10 *positions))
-
-;; (map vehicle-map (take 3 *positions))
-
-;; (def *positions (get-vehicle-positions))
