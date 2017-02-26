@@ -79,11 +79,12 @@
              ::api/stamp ($/datetime-for-stamp (Integer/parseInt at)))]
     (db/scheduled-trips-at db dt)))
 
-(defn select-route-trip [{{:keys [route-id]} :params, db :db}]
-  (let [trips (db/trips-for-route db route-id)
+(defn select-route-trip [{{:keys [route-id trip-start]} :params, db :db}]
+  (let [trips (db/trips-for-route db route-id trip-start)
         directions ($/index-by :direction trips)]
     (render-file "template/select_trip.djhtml" {:trips trips
-                                                :route-id route-id})))
+                                                :route-id route-id
+                                                :trip-start trip-start})))
 
 (defn benchmark [{{:keys [trip-id]} :params, db :db}]
   (let [stop-times (->> (db/stop-times-for-trip db trip-id)
@@ -167,6 +168,7 @@
   (GET "/trips_at" [] trips-at)
   ;; Helper for recording stop times:
   (GET "/select_trip/:route-id" req select-route-trip)
+  (GET "/select_trip/:route-id/:trip-start" req select-route-trip)
   (GET "/trip_benchmark/:trip-id" req benchmark)
   ;; Viewing recently ingested and processed data:
   (GET "/stats" req stats)

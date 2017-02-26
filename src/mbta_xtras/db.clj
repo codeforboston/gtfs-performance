@@ -85,8 +85,16 @@
          (:stops api-trip))))))
 
 
-(defn trips-for-route [db route-id]
-  (mc/find-maps db "trips" {:route-id route-id}))
+(defn trips-for-route
+  ([db route-id]
+   (trips-for-route db route-id nil))
+  ([db route-id trip-start]
+   (if trip-start
+     (let [trip-ids (mc/distinct db "trip-stops" :trip-id {:route-id route-id
+                                                           :trip-start trip-start})]
+       (mc/find-maps db "trips" {:trip-id {:$in trip-ids}}))
+
+     (mc/find-maps db "trips" {:route-id route-id}))))
 
 (defn add-stop-info [db xs]
   (let [stop-ids (into #{} (map :stop-id) xs)
