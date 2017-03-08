@@ -322,7 +322,7 @@
   [db trip-id trip-start]
   (doseq [stop (trip-performance db trip-id trip-start)]
     (let [id (str trip-id "-" trip-start "-" (:stop-id stop))]
-      (mc/upsert db "processed-trip-stops" {:id id} {:$set (assoc stop :id id)}))))
+      (mc/upsert db "processed-trip-stops" {:id id} (assoc stop :id id)))))
 
 (defn process-trips
   "Perform post-processing on the given trip instances (trip-id, trip-start
