@@ -19,7 +19,8 @@
             [clojure.java.io :as io]
 
             [taoensso.timbre :refer [error info]]
-            [mbta-xtras.utils :as $])
+            [mbta-xtras.utils :as $]
+            [clojure.string :as str])
   (:import [java.time LocalDate ZoneId]))
 
 
@@ -150,6 +151,9 @@
                    (dissoc (scheduled i) :arrival-time :departure-time)))
        (keys scheduled)))
 
+(def id-for-trip-stop
+  (comp #(str/join \- %) (juxt :trip-id :trip-start :stop-id)))
+
 (defn add-estimates
   "Takes a joined sequence of stops, scheduled and unscheduled, ordered by stop
   sequence. Finds any sub-sequences that have no observed arrival time and
@@ -159,64 +163,57 @@
   [all-stops & [last-obs]]
   (when-let [l (seq all-stops)]
     (let [[sched actual] (split-with :scheduled? l)]
-      (if (seq sched)
+      (if-let [[first-sched] (seq sched)]
+        ;; We have some scheduled stops:
         (concat (if-let [next-obs (first actual)]
+                  ;; 'Spread' the delay over the scheduled stops. If there's no
+                  ;; previous observation, then assume that the delay of the
+                  ;; first scheduled stop is 0.
+                  (let [last-arrival (or (:arrival-time last-obs)
+                                         (:scheduled-arrival first-sched))
+                        last-departure (or (:departure-time last-obs)
+                                           (:scheduled-departure first-sched))
+                        last-scheduled (or (:scheduled-arrival last-obs)
+                                           last-arrival)
+                        obs-duration (- (:arrival-time next-obs) last-arrival)
+                        sch-duration (- (:scheduled-arrival next-obs)
+                                        last-arrival)
+                        offset-delay (int (:delay next-obs))]
+                    (map (fn [scheduled-stop]
+                           ;; Assume delay is proportional to schedule:
+                           (let [delay (if (zero? sch-duration)
+                                         0
+                                         (* (/ (- (:scheduled-arrival scheduled-stop)
+                                                  last-scheduled)
+                                               sch-duration)
+                                            obs-duration))]
+                             (assoc scheduled-stop
+                                    :id (id-for-trip-stop scheduled-stop)
+                                    :arrival-time (long (+ last-arrival delay))
+                                    :departure-time (long (+ last-departure delay))
+                                    :delay (int delay)
+                                    :shift-delay offset-delay
+                                    :estimated? true)))
+                         sched))
+
                   (if last-obs
-                    ;; We have observed arrival times for the stops flanking this
-                    ;; subsequence of scheduled stops, so we'll 'spread' the
-                    ;; (positive or negative) delay over the stops between the
-                    ;; observed stops. Use the scheduled to determine the
-                    ;; proportion of the total trip that each stop represents and
-                    ;; scale the additional delay appropriately.
-                    (let [last-arrival (:arrival-time last-obs)
-                          obs-duration (- (:arrival-time next-obs) last-arrival)
-                          sch-duration (- (:scheduled-arrival next-obs)
-                                          (:scheduled-arrival last-obs))]
-                      (map (fn [scheduled-stop]
-                             (let [delay (if (zero? sch-duration)
-                                           0
-                                           (* (/ (- (:scheduled-arrival scheduled-stop)
-                                                    (:scheduled-arrival last-obs))
-                                                 sch-duration)
-                                              obs-duration))]
-                               (assoc scheduled-stop
-                                      :id (str (:trip-id scheduled-stop) "-"
-                                               (:trip-start scheduled-stop) "-"
-                                               (:stop-id scheduled-stop))
-                                      :arrival-time (long (+ last-arrival delay))
-                                      :departure-time (long (+ (:departure-time
-                                                                last-obs) delay))
-                                      :delay (int delay)
-                                      :estimation-method "interpolated"
-                                      :estimated? true)))
-                           sched))
-
-                    ;; There's a next observation but no last (previous) observation.
-
-                    ;; For estimation purposes, assume that the trip began on
-                    ;; time (delay=0) and became later/earlier at each stop in
-                    ;; proportion to the scheduled time between stops.
-                    (let [obs-delay (- (:arrival-time next-obs) (:scheduled-arrival next-obs))
-                          sch-start (:scheduled-arrival (first sched))
-                          sch-duration (- (:scheduled-arrival next-obs) sch-start)]
+                    ;; We have a previous observation with trailing :scheduled
+                    ;; stops. Shift the schedule by the delay of the
+                    ;; observation.
+                    (let [delay (:delay last-obs)]
                       (map (fn [{:keys [scheduled-arrival scheduled-departure]
                                  :as scheduled-stop}]
-                             (let [stop-delay (if (zero? sch-duration)
-                                                0
-                                                (* (/ (- scheduled-arrival sch-start)
-                                                      sch-duration)
-                                                   obs-delay))]
+                             (assoc scheduled-stop
+                                    :id (id-for-trip-stop scheduled-stop)
+                                    :arrival-time (+ scheduled-arrival delay)
+                                    :departure-time (+ scheduled-departure
+                                                       delay)
+                                    :shift-delay delay
+                                    :estimated? true))
+                           sched))
 
-                               (assoc scheduled-stop
-                                      :arrival-time (long (+ scheduled-arrival stop-delay))
-                                      :departure-time (long (+ scheduled-departure stop-delay))
-                                      :delay (int stop-delay)
-                                      :shift-delay (int obs-delay)
-                                      :estimated? true)))
-                           sched)))
-
-                  ;; We have only the schedule! Don't bother estimating.
-                  sched)
+                    ;; We have only the schedule! Don't bother estimating.
+                    sched))
 
                 (add-estimates actual last-obs))
 
@@ -230,19 +227,24 @@
           (concat actual (add-estimates rest (or (last non-skipped) last-obs))))))))
 
 
-(defn trip-performance
-  "Take the observed trip stop updates and the scheduled stop arrival times and
-  use them to calculate how far ahead or behind schedule each stop of the trip
-  was. When there is no information about a trip's arrival time at a stop,
-  estimate it using either interpolation or shifting, depending on the
-  information available."
+(defn all-stops-for-trip
   [db trip-id trip-start]
   (let [scheduled (stop-times db trip-id trip-start)
         trip-stops (->> (mc/find-maps db "trip-stops" {:trip-id trip-id
                                                        :trip-start trip-start})
                         (keep (partial add-stop-delay (comp :scheduled-arrival scheduled)))
                         (index-by :stop-sequence))]
-    (add-estimates (all-stops scheduled trip-stops))))
+    (all-stops scheduled trip-stops)))
+
+
+(def trip-performance
+  "Take the observed trip stop updates and the scheduled stop arrival times and
+  use them to calculate how far ahead or behind schedule each stop of the trip
+  was. When there is no information about a trip's arrival time at a stop,
+  estimate it using either interpolation or shifting, depending on the
+  information available."
+  (comp add-estimates all-stops-for-trip))
+
 
 
 (defn travel-times
