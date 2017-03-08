@@ -21,7 +21,7 @@
                 <td>{{ trip-stop.route-id }}</td>
                 <td>{{ trip-stop.stop-sequence }}</td>
                 <td>{{ trip-stop.stop-name }} ({{trip-stop.stop-id}})</td>
-                <td>{{ trip-stop.arrival-time|datefmt:"hh:mm:ss a" }}</td>
+                <td>{{ trip-stop.arrival-time|datefmt:"h:mm:ss a" }}</td>
             </tr>
         {% endfor %}
         </tbody>

@@ -15,28 +15,38 @@
     </div>
 
     <table class="table">
-        {% for stop in stops %}
+        <thead>
             <tr>
-                <td>
-                    #{{stop.stop-sequence}}. {{ stop.stop-name }}
-                </td>
-                <td>{{ stop.scheduled-arrival }}</td>
-                <td>{{ stop.arrival-time|datefmt:"hh:MM:ss a" }}</td>
-                <td>
-                    {% if stop.estimated? %}
-                        (estimated)
-                    {% endif %}
-                </td>
-                {% if stop.delay > 0 %}
-                    <td class="late">
-                        +{{ stop.delay }}s
-                    </td>
-                {% else %}
-                    <td class="early">
-                        {{ stop.delay }}s
-                    </td>
-                {% endif %}
+                <th>Stop</th>
+                <th>Scheduled</th>
+                <th>Arrived</th>
+                <th>Delay</th>
             </tr>
-        {% endfor %}
+        </thead>
+        <tbody>
+            {% for stop in stops %}
+                <tr>
+                    <td>
+                        #{{stop.stop-sequence}}. {{ stop.stop-name }}
+                    </td>
+                    <td>{{ stop.scheduled-arrival|datefmt:"h:mm:ss a" }}</td>
+                    <td>{{ stop.arrival-time|datefmt:"h:mm:ss a" }}</td>
+                    <td>
+                    {% if stop.delay > 0 %}
+                        <span class="late">
+                            +{{ stop.delay }}s
+                        </span>
+                    {% else %}
+                        <span class="early">
+                            {{ stop.delay }}s
+                        </span>
+                    {% endif %}
+                        {% if stop.estimated? %}
+                            (estimated)
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+        </tbody>
     </table>
 {% endblock %}
