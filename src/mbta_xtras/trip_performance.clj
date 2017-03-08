@@ -138,8 +138,7 @@
   [db trip-id start-date]
   (let [scheduled (scheduled-arrivals db trip-id start-date)]
     (->> (mc/find-maps db "trip-stops" {:trip-id trip-id,
-                                        :trip-start start-date
-                                        :estimated? {:$ne true}})
+                                        :trip-start start-date})
          (keep (partial add-stop-delay scheduled))
          (sort-by :stop-sequence))))
 
