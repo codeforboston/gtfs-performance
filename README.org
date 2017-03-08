@@ -17,7 +17,13 @@
     ~mbta-xtras.repl/db~ will be bound to the database for convenience.
     ~(stop-mongo)~ will close the connection.
 *** Noninteractive
-    Use ~lein trampoline run~
+    Use ~lein trampoline run~. If you want to be able to connect a REPL to the
+    running server, set the ~NREPL_SERVER_PORT~ environment variable. For
+    example:
+    #+BEGIN_SRC bash
+    NREPL_SERVER_PORT=12345 lein trampoline run
+    #+END_SRC
+    You can then use ~cider-connect~
    
 ** Environment Variables
    Configuration of the application is done entirely through environment
