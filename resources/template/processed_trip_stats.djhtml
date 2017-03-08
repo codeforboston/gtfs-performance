@@ -34,11 +34,11 @@
                     <td>
                     {% if stop.delay > 0 %}
                         <span class="late">
-                            +{{ stop.delay }}s
+                            +{{ stop.delay|duration }}
                         </span>
                     {% else %}
                         <span class="early">
-                            {{ stop.delay }}s
+                            {{ stop.delay|duration }}
                         </span>
                     {% endif %}
                         {% if stop.estimated? %}

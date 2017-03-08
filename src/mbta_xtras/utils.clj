@@ -184,3 +184,11 @@
     (.format (DateTimeFormatter/ofPattern pattern) x)))
 
 (add-filter! :datefmt datefmt)
+
+(defn duration-fmt [s]
+  (when (number? s)
+    (let [m (quot s 60) s (rem s 60)]
+      (str (when (pos? m) (str m "m "))
+           s "s"))))
+
+(add-filter! :duration duration-fmt)

@@ -23,7 +23,10 @@
                         <li class="list-group-item">
                             <h5 class="list-group-item-heading">
 
-                                {{ trip-id }}: {{ trip-stop-updates|count }} update{{ trip-stop-updates|count|pluralize }}
+                                <a href="../processed/{{trip-id}}/{{trip-stop-updates.0.trip-start}}">
+                                    {{ trip-id }}
+                                </a>:
+                                {{ trip-stop-updates|count }} update{{ trip-stop-updates|count|pluralize }}
                             </h5>
                             {% for stop in trip-stop-updates %}
                                 {{ stop.stop-sequence }}
