@@ -37,6 +37,9 @@
         :ret ::xs/scheduled-arrivals)
 
 (s/fdef add-stop-delay
+        :args (s/cat :scheduled ::xs/scheduled-arrivals))
+
+(s/fdef add-stop-delay
         :args (s/cat :scheduled (s/map-of ::xs/stop-sequence ::xs/arrival-time)
                      :stop ::xs/stop-update)
         :ret ::xs/stop-update)
@@ -245,6 +248,16 @@
   information available."
   (comp add-estimates all-stops-for-trip))
 
+
+(defn trip-performance-summary
+  [db trip-id trip-start]
+  (let [stops (all-stops-for-trip db trip-id trip-start)
+        observed (remove :scheduled? stops)]
+    {:observed (count observed)
+     :scheduled (count stops)
+     :average-delay (/ (apply + (map :delay observed)) (count observed))
+     :first-observation (:stop-sequence (first observed))
+     :last-observation (:stop-sequence (last observed))}))
 
 
 (defn travel-times
